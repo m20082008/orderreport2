@@ -89,12 +89,14 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
                         $address_2 = $order->get_billing_address_2();
                     }
 
-                    $address_parts = [
+                    $full_address = trim(implode(' - ', array_filter([
                         $state,
                         $city,
                         $address_1,
                         $address_2,
-                    ];
+                    ], static function ($value) {
+                        return $value !== null && $value !== '';
+                    })));
 
                     $items_column = [];
                     $qty_column = [];
@@ -113,12 +115,8 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
                     echo '<input type="hidden" name="action" value="wpr_save_address" />';
                     echo '<input type="hidden" name="order_id" value="' . esc_attr((string) $order_id) . '" />';
 
-                    echo '<input type="text" name="shipping_state" placeholder="استان" value="' . esc_attr((string) $state) . '" style="width:18%;margin-left:4px;" />';
-                    echo '<input type="text" name="shipping_city" placeholder="شهر" value="' . esc_attr((string) $city) . '" style="width:18%;margin-left:4px;" />';
-                    echo '<input type="text" name="shipping_address_1" placeholder="آدرس ۱" value="' . esc_attr((string) $address_1) . '" style="width:28%;margin-left:4px;" />';
-                    echo '<input type="text" name="shipping_address_2" placeholder="آدرس ۲" value="' . esc_attr((string) $address_2) . '" style="width:28%;" />';
-
-                    echo '<p style="margin-top:8px"><code>' . esc_html(implode(' - ', $address_parts)) . '</code></p>';
+                    echo '<textarea name="full_shipping_address" rows="3" style="width:100%;direction:rtl;" placeholder="نام دقیق استان - نام شهر - آدرس ۱- آدرس ۲- شماره پلاک">' . esc_textarea((string) $full_address) . '</textarea>';
+                    echo '<p style="margin-top:8px"><code>' . esc_html($full_address) . '</code></p>';
                     echo '</td>';
 
                     $postcode = $order->get_shipping_postcode();
@@ -132,7 +130,10 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
                     echo '<td>' . esc_html((string) $phone) . '</td>';
                     echo '<td>' . wp_kses_post(implode('<br>', $items_column)) . '</td>';
                     echo '<td>' . wp_kses_post(implode('<br>', $qty_column)) . '</td>';
-                    echo '<td><button type="submit" class="button button-primary">ذخیره آدرس</button></td>';
+                    echo '<td>';
+                    echo '<button type="submit" class="button button-primary">ذخیره آدرس</button>';
+                    echo '<button type="button" class="button" style="margin-top:8px;">چاپ لیبل</button>';
+                    echo '</td>';
                     echo '</form>';
                     echo '</tr>';
                 }
@@ -163,10 +164,13 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
                 exit;
             }
 
-            $shipping_state = isset($_POST['shipping_state']) ? sanitize_text_field(wp_unslash($_POST['shipping_state'])) : '';
-            $shipping_city = isset($_POST['shipping_city']) ? sanitize_text_field(wp_unslash($_POST['shipping_city'])) : '';
-            $shipping_address_1 = isset($_POST['shipping_address_1']) ? sanitize_text_field(wp_unslash($_POST['shipping_address_1'])) : '';
-            $shipping_address_2 = isset($_POST['shipping_address_2']) ? sanitize_text_field(wp_unslash($_POST['shipping_address_2'])) : '';
+            $full_shipping_address = isset($_POST['full_shipping_address']) ? sanitize_textarea_field(wp_unslash($_POST['full_shipping_address'])) : '';
+
+            $address_parts = array_map('trim', explode('-', $full_shipping_address));
+            $shipping_state = isset($address_parts[0]) ? $address_parts[0] : '';
+            $shipping_city = isset($address_parts[1]) ? $address_parts[1] : '';
+            $shipping_address_1 = isset($address_parts[2]) ? $address_parts[2] : '';
+            $shipping_address_2 = implode(' - ', array_slice($address_parts, 3));
 
             $order->set_shipping_state($shipping_state);
             $order->set_shipping_city($shipping_city);
