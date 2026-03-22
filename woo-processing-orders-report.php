@@ -182,6 +182,11 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
             }
         }
 
+        private function get_wp_local_timestamp()
+        {
+            return current_datetime()->getTimestamp();
+        }
+
         private function get_processing_stats_data()
         {
             $orders = wc_get_orders([
@@ -644,7 +649,7 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
             $total_items_count = $stats_data['total_items_count'];
             $address_packages_count = $stats_data['address_packages_count'];
             $address_order_groups = $stats_data['address_order_groups'];
-            $stats_generated_at = $this->format_persian_datetime(current_time('timestamp'));
+            $stats_generated_at = $this->format_persian_datetime($this->get_wp_local_timestamp());
             $total_orders_count = count($orders);
             $same_address_package_instructions = [];
 
@@ -808,7 +813,7 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
                     .label-box{height:100%;box-sizing:border-box;border:1px solid #000;border-radius:14px;padding:4px 6px;display:flex;flex-direction:column;gap:3px;}
                     .top-line{display:flex;justify-content:space-between;align-items:center;font-size:12px;font-weight:bold;}
                     .address-line{font-size:11px;line-height:1.4;min-height:30px;word-break:break-word;}
-                    .meta-line{display:flex;justify-content:space-between;gap:6px;font-size:11px;}
+                    .meta-line{display:flex;justify-content:space-between;gap:6px;font-size:11px;border-top:1px dotted #000;border-bottom:1px dotted #000;padding:3px 0;}
                     .items-line{font-size:11px;}
                     .order-pill{display:inline-block;border:1px solid #000;border-radius:999px;padding:1px 8px;min-width:54px;text-align:center;font-weight:bold;}
                     table{width:100%;border-collapse:collapse;font-size:11px;table-layout:fixed;}
@@ -906,7 +911,7 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
                     .label-box{height:100%;box-sizing:border-box;border:1px solid #000;border-radius:14px;padding:4px 6px;display:flex;flex-direction:column;gap:3px;}
                     .top-line{display:flex;justify-content:space-between;align-items:center;font-size:12px;font-weight:bold;}
                     .address-line{font-size:11px;line-height:1.4;min-height:30px;word-break:break-word;}
-                    .meta-line{display:flex;justify-content:space-between;gap:6px;font-size:11px;}
+                    .meta-line{display:flex;justify-content:space-between;gap:6px;font-size:11px;border-top:1px dotted #000;border-bottom:1px dotted #000;padding:3px 0;}
                     .items-line{font-size:11px;}
                     .order-pill{display:inline-block;border:1px solid #000;border-radius:999px;padding:1px 8px;min-width:54px;text-align:center;font-weight:bold;}
                     table{width:100%;border-collapse:collapse;font-size:11px;table-layout:fixed;}
