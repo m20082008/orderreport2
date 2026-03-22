@@ -249,7 +249,54 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
             })));
         }
 
-        private function get_order_label_pages($order, $max_rows_per_label = 3)
+        private function normalize_iran_phone($phone)
+        {
+            $raw_phone = (string) $phone;
+            $trimmed_phone = trim($raw_phone);
+            if ($trimmed_phone === '') {
+                return '';
+            }
+
+            $normalized_digits = strtr($trimmed_phone, [
+                '۰' => '0',
+                '۱' => '1',
+                '۲' => '2',
+                '۳' => '3',
+                '۴' => '4',
+                '۵' => '5',
+                '۶' => '6',
+                '۷' => '7',
+                '۸' => '8',
+                '۹' => '9',
+                '٠' => '0',
+                '١' => '1',
+                '٢' => '2',
+                '٣' => '3',
+                '٤' => '4',
+                '٥' => '5',
+                '٦' => '6',
+                '٧' => '7',
+                '٨' => '8',
+                '٩' => '9',
+            ]);
+            $normalized_digits = preg_replace('/[^\d+]+/u', '', (string) $normalized_digits);
+
+            if (preg_match('/^\+98(\d+)$/', (string) $normalized_digits, $matches)) {
+                return '0' . $matches[1];
+            }
+
+            if (preg_match('/^0098(\d+)$/', (string) $normalized_digits, $matches)) {
+                return '0' . $matches[1];
+            }
+
+            if (preg_match('/^98(\d+)$/', (string) $normalized_digits, $matches)) {
+                return '0' . $matches[1];
+            }
+
+            return (string) $trimmed_phone;
+        }
+
+        private function get_order_label_pages($order, $first_label_max_rows = 4, $other_labels_max_rows = 3)
         {
             $rows = [];
             foreach ($order->get_items() as $item) {
@@ -263,9 +310,17 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
                 return [[]];
             }
 
-            $max_rows_per_label = max(1, (int) $max_rows_per_label);
+            $first_label_max_rows = max(1, (int) $first_label_max_rows);
+            $other_labels_max_rows = max(1, (int) $other_labels_max_rows);
 
-            return array_chunk($rows, $max_rows_per_label);
+            $pages = [];
+            $pages[] = array_slice($rows, 0, $first_label_max_rows);
+            $remaining_rows = array_slice($rows, $first_label_max_rows);
+            if (! empty($remaining_rows)) {
+                $pages = array_merge($pages, array_chunk($remaining_rows, $other_labels_max_rows));
+            }
+
+            return $pages;
         }
 
         public function __construct()
@@ -361,7 +416,7 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
                     echo '<textarea name="full_shipping_address" rows="3" style="width:100%;min-width:520px;direction:rtl;' . esc_attr($address_textarea_border) . '" placeholder="نام دقیق استان - نام شهر - آدرس ۱- آدرس ۲- شماره پلاک">' . esc_textarea((string) $full_address) . '</textarea>';
                     echo '</td>';
 
-                    $phone = $order->get_billing_phone();
+                    $phone = $this->normalize_iran_phone($order->get_billing_phone());
                     $customer_note = $order->get_customer_note();
 
                     echo '<td>' . esc_html((string) $postcode) . '</td>';
@@ -498,8 +553,8 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
                 $postcode = $order->get_billing_postcode();
             }
 
-            $phone = $order->get_billing_phone();
-            $label_pages = $this->get_order_label_pages($order, 3);
+            $phone = $this->normalize_iran_phone($order->get_billing_phone());
+            $label_pages = $this->get_order_label_pages($order, 4, 3);
 
             echo '<!DOCTYPE html><html lang="fa" dir="rtl"><head><meta charset="UTF-8">';
             echo '<meta name="viewport" content="width=device-width, initial-scale=1.0">';
@@ -510,12 +565,12 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
                     .sheet{width:3.94in;height:1.97in;box-sizing:border-box;padding:4px;page-break-after:always;overflow:hidden;}
                     .sheet:last-child{page-break-after:auto;}
                     .label-box{height:100%;box-sizing:border-box;border:1px solid #000;border-radius:14px;padding:4px 6px;display:flex;flex-direction:column;gap:3px;}
-                    .top-line{display:flex;justify-content:space-between;align-items:center;font-size:11px;font-weight:bold;}
-                    .address-line{font-size:10px;line-height:1.35;min-height:26px;word-break:break-word;}
-                    .meta-line{display:flex;justify-content:space-between;gap:6px;font-size:10px;}
+                    .top-line{display:flex;justify-content:space-between;align-items:center;font-size:12px;font-weight:bold;}
+                    .address-line{font-size:11px;line-height:1.4;min-height:30px;word-break:break-word;}
+                    .meta-line{display:flex;justify-content:space-between;gap:6px;font-size:11px;}
                     .order-pill{display:inline-block;border:1px solid #000;border-radius:999px;padding:1px 8px;min-width:54px;text-align:center;font-weight:bold;}
-                    table{width:100%;border-collapse:collapse;font-size:10px;table-layout:fixed;}
-                    td{border:1px solid #000;padding:1px 3px;line-height:1.3;vertical-align:middle;}
+                    table{width:100%;border-collapse:collapse;font-size:11px;table-layout:fixed;}
+                    td{border:1px solid #000;padding:2px 3px;line-height:1.35;vertical-align:middle;}
                     td.qty{width:42px;text-align:center;font-weight:bold;white-space:nowrap;}
                     .print-note{display:none;}
                     @media screen{
