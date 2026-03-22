@@ -555,6 +555,10 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
 
             $phone = $this->normalize_iran_phone($order->get_billing_phone());
             $label_pages = $this->get_order_label_pages($order, 4, 3);
+            $total_order_items = 0;
+            foreach ($order->get_items() as $item) {
+                $total_order_items += (int) $item->get_quantity();
+            }
 
             echo '<!DOCTYPE html><html lang="fa" dir="rtl"><head><meta charset="UTF-8">';
             echo '<meta name="viewport" content="width=device-width, initial-scale=1.0">';
@@ -568,6 +572,7 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
                     .top-line{display:flex;justify-content:space-between;align-items:center;font-size:12px;font-weight:bold;}
                     .address-line{font-size:11px;line-height:1.4;min-height:30px;word-break:break-word;}
                     .meta-line{display:flex;justify-content:space-between;gap:6px;font-size:11px;}
+                    .items-line{font-size:11px;}
                     .order-pill{display:inline-block;border:1px solid #000;border-radius:999px;padding:1px 8px;min-width:54px;text-align:center;font-weight:bold;}
                     table{width:100%;border-collapse:collapse;font-size:11px;table-layout:fixed;}
                     td{border:1px solid #000;padding:2px 3px;line-height:1.35;vertical-align:middle;}
@@ -596,6 +601,7 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
                     echo '<span>کد پستی: ' . esc_html((string) $postcode !== '' ? (string) $postcode : '-') . '</span>';
                     echo '<span>شماره تماس: ' . esc_html((string) $phone !== '' ? (string) $phone : '-') . '</span>';
                     echo '</div>';
+                    echo '<div class="items-line">تعداد اقلام: ' . esc_html((string) $total_order_items) . ' عدد</div>';
                 } else {
                     echo '<div class="top-line"><span>ادامه سفارش #' . esc_html((string) $order_id) . '</span></div>';
                 }
