@@ -14,6 +14,93 @@ if (! defined('ABSPATH')) {
 if (! class_exists('WPR_Processing_Orders_Report')) {
     class WPR_Processing_Orders_Report
     {
+        private function format_persian_datetime($timestamp)
+        {
+            if (class_exists('IntlDateFormatter')) {
+                $formatter = new IntlDateFormatter(
+                    'fa_IR@calendar=persian',
+                    IntlDateFormatter::FULL,
+                    IntlDateFormatter::SHORT,
+                    wp_timezone(),
+                    IntlDateFormatter::TRADITIONAL,
+                    'yyyy/MM/dd HH:mm:ss'
+                );
+
+                if ($formatter) {
+                    $formatted = $formatter->format($timestamp);
+                    if ($formatted !== false) {
+                        return (string) $formatted;
+                    }
+                }
+            }
+
+            return wp_date('Y/m/d H:i:s', $timestamp);
+        }
+
+        private function get_processing_stats_data()
+        {
+            $orders = wc_get_orders([
+                'status' => ['processing'],
+                'limit'  => -1,
+                'orderby' => 'date',
+                'order' => 'DESC',
+            ]);
+
+            $product_totals = [];
+            $total_items_count = 0;
+            $address_packages = [];
+
+            foreach ($orders as $order) {
+                $state = $order->get_shipping_state();
+                $city = $order->get_shipping_city();
+                $address_1 = $order->get_shipping_address_1();
+                $address_2 = $order->get_shipping_address_2();
+
+                if (empty($state) && empty($city) && empty($address_1) && empty($address_2)) {
+                    $state = $order->get_billing_state();
+                    $city = $order->get_billing_city();
+                    $address_1 = $order->get_billing_address_1();
+                    $address_2 = $order->get_billing_address_2();
+                }
+
+                $state = $this->get_readable_state($order, $state);
+                $full_address = trim(implode(' - ', array_filter([
+                    $state,
+                    $city,
+                    $address_1,
+                    $address_2,
+                ], static function ($value) {
+                    return $value !== null && $value !== '';
+                })));
+
+                $address_key = preg_replace('/\s+/u', ' ', trim((string) $full_address));
+                if ($address_key === '') {
+                    $address_key = '__EMPTY__ORDER__' . $order->get_id();
+                }
+                $address_packages[$address_key] = true;
+
+                foreach ($order->get_items() as $item) {
+                    $item_name = $item->get_name();
+                    $item_quantity = (int) $item->get_quantity();
+
+                    if (! isset($product_totals[$item_name])) {
+                        $product_totals[$item_name] = 0;
+                    }
+                    $product_totals[$item_name] += $item_quantity;
+                    $total_items_count += $item_quantity;
+                }
+            }
+
+            arsort($product_totals);
+
+            return [
+                'orders' => $orders,
+                'product_totals' => $product_totals,
+                'total_items_count' => $total_items_count,
+                'address_packages_count' => count($address_packages),
+            ];
+        }
+
         private function get_readable_state($order, $state_code)
         {
             if ($state_code === null || $state_code === '') {
@@ -44,6 +131,7 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
         {
             add_action('admin_menu', [$this, 'register_menu']);
             add_action('admin_post_wpr_save_address', [$this, 'save_address']);
+            add_action('admin_post_wpr_stats_report', [$this, 'render_stats_report_page']);
         }
 
         public function register_menu()
@@ -70,19 +158,8 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
                 return;
             }
 
-            $orders = wc_get_orders([
-                'status' => ['processing'],
-                'limit'  => -1,
-                'orderby' => 'date',
-                'order' => 'DESC',
-            ]);
-
-            $show_stats = isset($_GET['wpr_show_stats']) && $_GET['wpr_show_stats'] === '1';
-            $stats_generated_at = current_time('Y-m-d H:i:s');
-            $product_totals = [];
-            $total_items_count = 0;
-            $total_orders_count = count($orders);
-            $address_packages = [];
+            $stats_data = $this->get_processing_stats_data();
+            $orders = $stats_data['orders'];
 
             echo '<div class="wrap">';
             echo '<h1>گزارش سفارش‌های در حال انجام</h1>';
@@ -134,25 +211,12 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
                         return $value !== null && $value !== '';
                     })));
 
-                    $address_key = preg_replace('/\s+/u', ' ', trim((string) $full_address));
-                    if ($address_key === '') {
-                        $address_key = '__EMPTY__ORDER__' . $order_id;
-                    }
-                    $address_packages[$address_key] = true;
-
                     $items_column = [];
                     $qty_column = [];
                     foreach ($order->get_items() as $item) {
                         $items_column[] = esc_html($item->get_name());
                         $item_quantity = (int) $item->get_quantity();
                         $qty_column[] = esc_html((string) $item_quantity);
-
-                        $item_name = $item->get_name();
-                        if (! isset($product_totals[$item_name])) {
-                            $product_totals[$item_name] = 0;
-                        }
-                        $product_totals[$item_name] += $item_quantity;
-                        $total_items_count += $item_quantity;
                     }
 
                     echo '<tr>';
@@ -166,7 +230,6 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
                     echo '<input type="hidden" name="order_id" value="' . esc_attr((string) $order_id) . '" />';
 
                     echo '<textarea name="full_shipping_address" rows="3" style="width:100%;direction:rtl;" placeholder="نام دقیق استان - نام شهر - آدرس ۱- آدرس ۲- شماره پلاک">' . esc_textarea((string) $full_address) . '</textarea>';
-                    echo '<p style="margin-top:8px"><code>' . esc_html($full_address) . '</code></p>';
                     echo '</td>';
 
                     $postcode = $order->get_shipping_postcode();
@@ -194,40 +257,70 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
             echo '</tbody></table>';
             echo '<div style="margin-top:16px;display:flex;gap:8px;align-items:center;">';
             echo '<button type="button" class="button button-secondary">چاپ کلیه لیبل‌ها</button>';
-            echo '<form method="get" action="' . esc_url(admin_url('admin.php')) . '" style="margin:0;">';
-            echo '<input type="hidden" name="page" value="wpr-processing-orders-report" />';
-            echo '<input type="hidden" name="wpr_show_stats" value="1" />';
+            echo '<form method="get" action="' . esc_url(admin_url('admin-post.php')) . '" style="margin:0;" target="_blank">';
+            echo '<input type="hidden" name="action" value="wpr_stats_report" />';
+            echo '<input type="hidden" name="_wpnonce" value="' . esc_attr(wp_create_nonce('wpr_stats_report')) . '" />';
             echo '<button type="submit" class="button button-secondary">گزارش آمار</button>';
             echo '</form>';
             echo '</div>';
-
-            if ($show_stats) {
-                arsort($product_totals);
-
-                echo '<div style="margin-top:16px;padding:16px;background:#fff;border:1px solid #ccd0d4;">';
-                echo '<h2 style="margin-top:0;">گزارش آمار سفارش‌ها</h2>';
-                echo '<p><strong>زمان گزارش:</strong> ' . esc_html($stats_generated_at) . '</p>';
-                echo '<p><strong>تعداد کل سفارش‌ها:</strong> ' . esc_html((string) $total_orders_count) . '</p>';
-                echo '<p><strong>تعداد کل اقلام:</strong> ' . esc_html((string) $total_items_count) . '</p>';
-                echo '<p><strong>تعداد بسته‌ها (بر اساس آدرس یکسان):</strong> ' . esc_html((string) count($address_packages)) . '</p>';
-
-                if (empty($product_totals)) {
-                    echo '<p>برای این بازه سفارشی ثبت نشده است.</p>';
-                } else {
-                    echo '<h3>تجمیع محصولات</h3>';
-                    echo '<table class="widefat striped" style="max-width:900px;">';
-                    echo '<thead><tr><th>محصول</th><th>تعداد کل سفارش داده‌شده</th></tr></thead><tbody>';
-                    foreach ($product_totals as $product_name => $quantity) {
-                        echo '<tr>';
-                        echo '<td>' . esc_html((string) $product_name) . '</td>';
-                        echo '<td>' . esc_html((string) $quantity) . '</td>';
-                        echo '</tr>';
-                    }
-                    echo '</tbody></table>';
-                }
-                echo '</div>';
-            }
             echo '</div>';
+        }
+
+        public function render_stats_report_page()
+        {
+            if (! current_user_can('manage_woocommerce')) {
+                wp_die('شما دسترسی لازم را ندارید.');
+            }
+
+            check_admin_referer('wpr_stats_report');
+
+            if (! class_exists('WooCommerce')) {
+                wp_die('ووکامرس فعال نیست.');
+            }
+
+            $stats_data = $this->get_processing_stats_data();
+            $orders = $stats_data['orders'];
+            $product_totals = $stats_data['product_totals'];
+            $total_items_count = $stats_data['total_items_count'];
+            $address_packages_count = $stats_data['address_packages_count'];
+            $stats_generated_at = $this->format_persian_datetime(current_time('timestamp'));
+            $total_orders_count = count($orders);
+
+            echo '<!DOCTYPE html><html lang="fa" dir="rtl"><head><meta charset="UTF-8">';
+            echo '<meta name="viewport" content="width=device-width, initial-scale=1.0">';
+            echo '<title>گزارش آمار سفارش‌های در حال انجام</title>';
+            echo '<style>
+                    body{font-family:tahoma,Arial,sans-serif;background:#f6f7f7;color:#1d2327;padding:24px;}
+                    .report-wrap{max-width:1100px;margin:0 auto;background:#fff;padding:20px;border:1px solid #ccd0d4;}
+                    h1,h2{margin-top:0}
+                    table{width:100%;border-collapse:collapse;margin-top:16px;}
+                    th,td{border:1px solid #dcdcde;padding:8px;text-align:right;}
+                    th{background:#f0f0f1;}
+                  </style></head><body>';
+
+            echo '<div class="report-wrap">';
+            echo '<h1>گزارش آمار سفارش‌ها</h1>';
+            echo '<p><strong>زمان گزارش:</strong> ' . esc_html($stats_generated_at) . '</p>';
+            echo '<p><strong>تعداد کل سفارش‌ها:</strong> ' . esc_html((string) $total_orders_count) . '</p>';
+            echo '<p><strong>تعداد کل اقلام:</strong> ' . esc_html((string) $total_items_count) . '</p>';
+            echo '<p><strong>تعداد بسته‌ها (بر اساس آدرس یکسان):</strong> ' . esc_html((string) $address_packages_count) . '</p>';
+
+            if (empty($product_totals)) {
+                echo '<p>برای این بازه سفارشی ثبت نشده است.</p>';
+            } else {
+                echo '<h2>تجمیع محصولات</h2>';
+                echo '<table>';
+                echo '<thead><tr><th>محصول</th><th>تعداد کل سفارش داده‌شده</th></tr></thead><tbody>';
+                foreach ($product_totals as $product_name => $quantity) {
+                    echo '<tr>';
+                    echo '<td>' . esc_html((string) $product_name) . '</td>';
+                    echo '<td>' . esc_html((string) $quantity) . '</td>';
+                    echo '</tr>';
+                }
+                echo '</tbody></table>';
+            }
+            echo '</div></body></html>';
+            exit;
         }
 
         public function save_address()
