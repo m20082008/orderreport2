@@ -223,11 +223,57 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
             return (string) $state_code;
         }
 
+        private function get_full_shipping_address($order)
+        {
+            $state = $order->get_shipping_state();
+            $city = $order->get_shipping_city();
+            $address_1 = $order->get_shipping_address_1();
+            $address_2 = $order->get_shipping_address_2();
+
+            if (empty($state) && empty($city) && empty($address_1) && empty($address_2)) {
+                $state = $order->get_billing_state();
+                $city = $order->get_billing_city();
+                $address_1 = $order->get_billing_address_1();
+                $address_2 = $order->get_billing_address_2();
+            }
+
+            $state = $this->get_readable_state($order, $state);
+
+            return trim(implode(' - ', array_filter([
+                $state,
+                $city,
+                $address_1,
+                $address_2,
+            ], static function ($value) {
+                return $value !== null && $value !== '';
+            })));
+        }
+
+        private function get_order_label_pages($order, $max_rows_per_label = 3)
+        {
+            $rows = [];
+            foreach ($order->get_items() as $item) {
+                $rows[] = [
+                    'name' => (string) $item->get_name(),
+                    'qty'  => (int) $item->get_quantity(),
+                ];
+            }
+
+            if (empty($rows)) {
+                return [[]];
+            }
+
+            $max_rows_per_label = max(1, (int) $max_rows_per_label);
+
+            return array_chunk($rows, $max_rows_per_label);
+        }
+
         public function __construct()
         {
             add_action('admin_menu', [$this, 'register_menu']);
             add_action('admin_post_wpr_save_address', [$this, 'save_address']);
             add_action('admin_post_wpr_stats_report', [$this, 'render_stats_report_page']);
+            add_action('admin_post_wpr_print_label', [$this, 'render_print_label_page']);
         }
 
         public function register_menu()
@@ -283,29 +329,7 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
                 foreach ($orders as $order) {
                     $order_id = $order->get_id();
                     $full_name = trim($order->get_billing_first_name() . ' ' . $order->get_billing_last_name());
-
-                    $state = $order->get_shipping_state();
-                    $city = $order->get_shipping_city();
-                    $address_1 = $order->get_shipping_address_1();
-                    $address_2 = $order->get_shipping_address_2();
-
-                    if (empty($state) && empty($city) && empty($address_1) && empty($address_2)) {
-                        $state = $order->get_billing_state();
-                        $city = $order->get_billing_city();
-                        $address_1 = $order->get_billing_address_1();
-                        $address_2 = $order->get_billing_address_2();
-                    }
-
-                    $state = $this->get_readable_state($order, $state);
-
-                    $full_address = trim(implode(' - ', array_filter([
-                        $state,
-                        $city,
-                        $address_1,
-                        $address_2,
-                    ], static function ($value) {
-                        return $value !== null && $value !== '';
-                    })));
+                    $full_address = $this->get_full_shipping_address($order);
 
                     $items_column = [];
                     $qty_column = [];
@@ -347,7 +371,12 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
                     echo '<td>' . wp_kses_post(implode('<br>', $qty_column)) . '</td>';
                     echo '<td>';
                     echo '<button type="submit" class="button button-primary">ذخیره آدرس</button>';
-                    echo '<button type="button" class="button" style="margin-top:8px;">چاپ لیبل</button>';
+                    $print_label_url = add_query_arg([
+                        'action' => 'wpr_print_label',
+                        'order_id' => $order_id,
+                        '_wpnonce' => wp_create_nonce('wpr_print_label_' . $order_id),
+                    ], admin_url('admin-post.php'));
+                    echo '<a class="button" style="margin-top:8px;" target="_blank" href="' . esc_url($print_label_url) . '">چاپ لیبل</a>';
                     echo '</td>';
                     echo '</form>';
                     echo '</tr>';
@@ -440,6 +469,95 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
                 echo '</tbody></table>';
             }
             echo '</div></body></html>';
+            exit;
+        }
+
+        public function render_print_label_page()
+        {
+            if (! current_user_can('manage_woocommerce')) {
+                wp_die('شما دسترسی لازم را ندارید.');
+            }
+
+            $order_id = isset($_GET['order_id']) ? absint($_GET['order_id']) : 0;
+            if (! $order_id) {
+                wp_die('شناسه سفارش نامعتبر است.');
+            }
+
+            check_admin_referer('wpr_print_label_' . $order_id);
+
+            $order = wc_get_order($order_id);
+            if (! $order) {
+                wp_die('سفارش پیدا نشد.');
+            }
+
+            $full_name = trim($order->get_billing_first_name() . ' ' . $order->get_billing_last_name());
+            $full_address = $this->get_full_shipping_address($order);
+
+            $postcode = $order->get_shipping_postcode();
+            if (empty($postcode)) {
+                $postcode = $order->get_billing_postcode();
+            }
+
+            $phone = $order->get_billing_phone();
+            $label_pages = $this->get_order_label_pages($order, 3);
+
+            echo '<!DOCTYPE html><html lang="fa" dir="rtl"><head><meta charset="UTF-8">';
+            echo '<meta name="viewport" content="width=device-width, initial-scale=1.0">';
+            echo '<title>لیبل سفارش #' . esc_html((string) $order_id) . '</title>';
+            echo '<style>
+                    @page{size:3.94in 1.97in;margin:0;}
+                    body{font-family:tahoma,Arial,sans-serif;background:#fff;margin:0;padding:0;color:#000;}
+                    .sheet{width:3.94in;height:1.97in;box-sizing:border-box;padding:4px;page-break-after:always;overflow:hidden;}
+                    .sheet:last-child{page-break-after:auto;}
+                    .label-box{height:100%;box-sizing:border-box;border:1px solid #000;border-radius:14px;padding:4px 6px;display:flex;flex-direction:column;gap:3px;}
+                    .top-line{display:flex;justify-content:space-between;align-items:center;font-size:11px;font-weight:bold;}
+                    .address-line{font-size:10px;line-height:1.35;min-height:26px;word-break:break-word;}
+                    .meta-line{display:flex;justify-content:space-between;gap:6px;font-size:10px;}
+                    .order-pill{display:inline-block;border:1px solid #000;border-radius:999px;padding:1px 8px;min-width:54px;text-align:center;font-weight:bold;}
+                    table{width:100%;border-collapse:collapse;font-size:10px;table-layout:fixed;}
+                    td{border:1px solid #000;padding:1px 3px;line-height:1.3;vertical-align:middle;}
+                    td.qty{width:42px;text-align:center;font-weight:bold;white-space:nowrap;}
+                    .print-note{display:none;}
+                    @media screen{
+                        body{background:#f0f0f1;padding:10px;}
+                        .sheet{margin:0 auto 8px auto;background:#fff;box-shadow:0 2px 8px rgba(0,0,0,.15);}
+                        .print-note{display:block;margin:0 auto 12px auto;text-align:center;font-size:12px;}
+                    }
+                  </style></head><body>';
+            echo '<p class="print-note">برای چاپ لیبل‌ها از Ctrl+P استفاده کنید.</p>';
+
+            foreach ($label_pages as $page_index => $page_rows) {
+                $is_first_page = $page_index === 0;
+
+                echo '<section class="sheet"><div class="label-box">';
+
+                if ($is_first_page) {
+                    echo '<div class="top-line">';
+                    echo '<span>گیرنده: ' . esc_html($full_name !== '' ? $full_name : '-') . '</span>';
+                    echo '<span>شماره سفارش: <span class="order-pill">' . esc_html((string) $order_id) . '</span></span>';
+                    echo '</div>';
+                    echo '<div class="address-line">آدرس: ' . esc_html($full_address !== '' ? $full_address : '-') . '</div>';
+                    echo '<div class="meta-line">';
+                    echo '<span>کد پستی: ' . esc_html((string) $postcode !== '' ? (string) $postcode : '-') . '</span>';
+                    echo '<span>شماره تماس: ' . esc_html((string) $phone !== '' ? (string) $phone : '-') . '</span>';
+                    echo '</div>';
+                } else {
+                    echo '<div class="top-line"><span>ادامه سفارش #' . esc_html((string) $order_id) . '</span></div>';
+                }
+
+                echo '<table><tbody>';
+                foreach ($page_rows as $row) {
+                    echo '<tr>';
+                    echo '<td class="qty">' . esc_html((string) $row['qty']) . ' عدد</td>';
+                    echo '<td>' . esc_html((string) $row['name']) . '</td>';
+                    echo '</tr>';
+                }
+                echo '</tbody></table>';
+
+                echo '</div></section>';
+            }
+
+            echo '</body></html>';
             exit;
         }
 
