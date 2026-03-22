@@ -14,6 +14,33 @@ if (! defined('ABSPATH')) {
 if (! class_exists('WPR_Processing_Orders_Report')) {
     class WPR_Processing_Orders_Report
     {
+        const LABEL_LOG_TABLE_SUFFIX = 'wpr_label_print_logs';
+
+        public static function activate()
+        {
+            global $wpdb;
+
+            $table_name = $wpdb->prefix . self::LABEL_LOG_TABLE_SUFFIX;
+            $charset_collate = $wpdb->get_charset_collate();
+
+            require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+
+            $sql = "CREATE TABLE {$table_name} (
+                id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+                printed_at DATETIME NOT NULL,
+                order_ids LONGTEXT NOT NULL,
+                order_count INT(11) UNSIGNED NOT NULL DEFAULT 0,
+                package_count INT(11) UNSIGNED NOT NULL DEFAULT 0,
+                total_items_count INT(11) UNSIGNED NOT NULL DEFAULT 0,
+                product_totals LONGTEXT NOT NULL,
+                address_order_groups LONGTEXT NOT NULL,
+                created_by BIGINT(20) UNSIGNED NOT NULL DEFAULT 0,
+                PRIMARY KEY  (id)
+            ) {$charset_collate};";
+
+            dbDelta($sql);
+        }
+
         private function normalize_product_name_for_sort($product_name)
         {
             $normalized = strtr((string) $product_name, [
@@ -136,6 +163,15 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
                 'order' => 'DESC',
             ]);
 
+            return $this->build_stats_data_from_orders($orders);
+        }
+
+        private function build_stats_data_from_orders($orders)
+        {
+            if (! is_array($orders)) {
+                $orders = [];
+            }
+
             $product_totals = [];
             $total_items_count = 0;
             $address_packages = [];
@@ -195,6 +231,91 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
                 'address_packages_count' => count($address_packages),
                 'address_order_groups' => $address_order_groups,
             ];
+        }
+
+        private function get_orders_by_ids($order_ids)
+        {
+            $normalized_ids = array_values(array_unique(array_filter(array_map('absint', (array) $order_ids))));
+            if (empty($normalized_ids)) {
+                return [];
+            }
+
+            $orders = wc_get_orders([
+                'limit' => -1,
+                'orderby' => 'post__in',
+                'include' => $normalized_ids,
+            ]);
+
+            if (! is_array($orders)) {
+                return [];
+            }
+
+            $orders_by_id = [];
+            foreach ($orders as $order) {
+                $orders_by_id[(int) $order->get_id()] = $order;
+            }
+
+            $sorted_orders = [];
+            foreach ($normalized_ids as $order_id) {
+                if (isset($orders_by_id[$order_id])) {
+                    $sorted_orders[] = $orders_by_id[$order_id];
+                }
+            }
+
+            return $sorted_orders;
+        }
+
+        private function get_snapshot_order_ids_from_request($request_data)
+        {
+            if (! isset($request_data['snapshot_order_ids'])) {
+                return [];
+            }
+
+            $raw_snapshot = sanitize_text_field(wp_unslash((string) $request_data['snapshot_order_ids']));
+            if ($raw_snapshot === '') {
+                return [];
+            }
+
+            $parts = explode(',', $raw_snapshot);
+
+            return array_values(array_unique(array_filter(array_map('absint', $parts))));
+        }
+
+        private function create_label_print_log($stats_data, $order_ids)
+        {
+            global $wpdb;
+
+            $table_name = $wpdb->prefix . self::LABEL_LOG_TABLE_SUFFIX;
+            $current_user_id = get_current_user_id();
+
+            $inserted = $wpdb->insert(
+                $table_name,
+                [
+                    'printed_at' => current_time('mysql'),
+                    'order_ids' => wp_json_encode(array_values($order_ids)),
+                    'order_count' => count($order_ids),
+                    'package_count' => isset($stats_data['address_packages_count']) ? (int) $stats_data['address_packages_count'] : 0,
+                    'total_items_count' => isset($stats_data['total_items_count']) ? (int) $stats_data['total_items_count'] : 0,
+                    'product_totals' => wp_json_encode(isset($stats_data['product_totals']) ? $stats_data['product_totals'] : []),
+                    'address_order_groups' => wp_json_encode(isset($stats_data['address_order_groups']) ? $stats_data['address_order_groups'] : []),
+                    'created_by' => $current_user_id ? (int) $current_user_id : 0,
+                ],
+                ['%s', '%s', '%d', '%d', '%d', '%s', '%s', '%d']
+            );
+
+            if ($inserted === false) {
+                return 0;
+            }
+
+            return (int) $wpdb->insert_id;
+        }
+
+        private function get_label_log($log_id)
+        {
+            global $wpdb;
+            $table_name = $wpdb->prefix . self::LABEL_LOG_TABLE_SUFFIX;
+
+            return $wpdb->get_row($wpdb->prepare("SELECT * FROM {$table_name} WHERE id = %d", $log_id));
         }
 
         private function get_readable_state($order, $state_code)
@@ -330,6 +451,8 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
             add_action('admin_post_wpr_stats_report', [$this, 'render_stats_report_page']);
             add_action('admin_post_wpr_print_label', [$this, 'render_print_label_page']);
             add_action('admin_post_wpr_print_all_labels', [$this, 'render_print_all_labels_page']);
+            add_action('admin_post_wpr_print_all_labels_from_log', [$this, 'render_print_all_labels_from_log']);
+            add_action('admin_post_wpr_stats_report_from_log', [$this, 'render_stats_report_from_log']);
         }
 
         public function register_menu()
@@ -342,6 +465,15 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
                 [$this, 'render_page'],
                 'dashicons-list-view',
                 56
+            );
+
+            add_submenu_page(
+                'wpr-processing-orders-report',
+                'لاگ چاپ لیبل',
+                'لاگ چاپ لیبل',
+                'manage_woocommerce',
+                'wpr-processing-orders-report-logs',
+                [$this, 'render_logs_page']
             );
         }
 
@@ -444,6 +576,10 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
             echo '<form method="get" action="' . esc_url(admin_url('admin-post.php')) . '" style="margin:0;" target="_blank">';
             echo '<input type="hidden" name="action" value="wpr_print_all_labels" />';
             echo '<input type="hidden" name="_wpnonce" value="' . esc_attr(wp_create_nonce('wpr_print_all_labels')) . '" />';
+            $snapshot_order_ids = array_map(static function ($order) {
+                return (int) $order->get_id();
+            }, $orders);
+            echo '<input type="hidden" name="snapshot_order_ids" value="' . esc_attr(implode(',', $snapshot_order_ids)) . '" />';
             echo '<button type="submit" class="button button-secondary">چاپ لیبل کلی</button>';
             echo '</form>';
             echo '<form method="get" action="' . esc_url(admin_url('admin-post.php')) . '" style="margin:0;" target="_blank">';
@@ -468,6 +604,11 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
             }
 
             $stats_data = $this->get_processing_stats_data();
+            $snapshot_order_ids = $this->get_snapshot_order_ids_from_request($_GET);
+            if (! empty($snapshot_order_ids)) {
+                $snapshot_orders = $this->get_orders_by_ids($snapshot_order_ids);
+                $stats_data = $this->build_stats_data_from_orders($snapshot_orders);
+            }
             $orders = $stats_data['orders'];
             $product_totals = $stats_data['product_totals'];
             $total_items_count = $stats_data['total_items_count'];
@@ -530,6 +671,65 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
             }
             echo '</div></body></html>';
             exit;
+        }
+
+        public function render_logs_page()
+        {
+            if (! current_user_can('manage_woocommerce')) {
+                wp_die('شما دسترسی لازم را ندارید.');
+            }
+
+            global $wpdb;
+            $table_name = $wpdb->prefix . self::LABEL_LOG_TABLE_SUFFIX;
+            $logs = $wpdb->get_results("SELECT * FROM {$table_name} ORDER BY printed_at DESC, id DESC LIMIT 500");
+
+            echo '<div class="wrap">';
+            echo '<h1>لاگ چاپ لیبل کلی</h1>';
+            echo '<table class="widefat striped">';
+            echo '<thead><tr>';
+            echo '<th>تاریخ چاپ لیبل</th>';
+            echo '<th>تعداد سفارشات</th>';
+            echo '<th>تعداد بسته‌ها</th>';
+            echo '<th>چاپ مجدد کلیه لیبل‌ها</th>';
+            echo '<th>گزارش آمار</th>';
+            echo '</tr></thead><tbody>';
+
+            if (empty($logs)) {
+                echo '<tr><td colspan="5">هنوز لاگی برای چاپ لیبل کلی ثبت نشده است.</td></tr>';
+            } else {
+                foreach ($logs as $log) {
+                    $print_link = add_query_arg(
+                        [
+                            'action' => 'wpr_print_all_labels_from_log',
+                            'log_id' => (int) $log->id,
+                            '_wpnonce' => wp_create_nonce('wpr_print_all_labels_from_log_' . (int) $log->id),
+                        ],
+                        admin_url('admin-post.php')
+                    );
+                    $stats_link = add_query_arg(
+                        [
+                            'action' => 'wpr_stats_report_from_log',
+                            'log_id' => (int) $log->id,
+                            '_wpnonce' => wp_create_nonce('wpr_stats_report_from_log_' . (int) $log->id),
+                        ],
+                        admin_url('admin-post.php')
+                    );
+
+                    $printed_timestamp = strtotime((string) $log->printed_at);
+                    $printed_at = $printed_timestamp ? $this->format_persian_datetime($printed_timestamp) : (string) $log->printed_at;
+
+                    echo '<tr>';
+                    echo '<td>' . esc_html($printed_at) . '</td>';
+                    echo '<td>' . esc_html((string) $log->order_count) . '</td>';
+                    echo '<td>' . esc_html((string) $log->package_count) . '</td>';
+                    echo '<td><a class="button button-secondary" target="_blank" href="' . esc_url($print_link) . '">چاپ مجدد</a></td>';
+                    echo '<td><a class="button button-secondary" target="_blank" href="' . esc_url($stats_link) . '">نمایش گزارش</a></td>';
+                    echo '</tr>';
+                }
+            }
+
+            echo '</tbody></table>';
+            echo '</div>';
         }
 
         public function render_print_label_page()
@@ -646,12 +846,23 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
                 wp_die('ووکامرس فعال نیست.');
             }
 
-            $stats_data = $this->get_processing_stats_data();
+            $snapshot_order_ids = $this->get_snapshot_order_ids_from_request($_GET);
+            if (empty($snapshot_order_ids)) {
+                $stats_data = $this->get_processing_stats_data();
+            } else {
+                $snapshot_orders = $this->get_orders_by_ids($snapshot_order_ids);
+                $stats_data = $this->build_stats_data_from_orders($snapshot_orders);
+            }
             $orders = $stats_data['orders'];
 
             if (empty($orders)) {
                 wp_die('سفارش در حال انجامی برای چاپ لیبل وجود ندارد.');
             }
+
+            $order_ids_for_log = array_map(static function ($order) {
+                return (int) $order->get_id();
+            }, $orders);
+            $this->create_label_print_log($stats_data, $order_ids_for_log);
 
             echo '<!DOCTYPE html><html lang="fa" dir="rtl"><head><meta charset="UTF-8">';
             echo '<meta name="viewport" content="width=device-width, initial-scale=1.0">';
@@ -737,6 +948,74 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
             exit;
         }
 
+        public function render_print_all_labels_from_log()
+        {
+            if (! current_user_can('manage_woocommerce')) {
+                wp_die('شما دسترسی لازم را ندارید.');
+            }
+
+            $log_id = isset($_GET['log_id']) ? absint($_GET['log_id']) : 0;
+            if (! $log_id) {
+                wp_die('شناسه لاگ نامعتبر است.');
+            }
+
+            check_admin_referer('wpr_print_all_labels_from_log_' . $log_id);
+            $log = $this->get_label_log($log_id);
+            if (! $log) {
+                wp_die('لاگ چاپ پیدا نشد.');
+            }
+
+            $order_ids = json_decode((string) $log->order_ids, true);
+            if (! is_array($order_ids)) {
+                $order_ids = [];
+            }
+
+            $redirect_url = add_query_arg(
+                [
+                    'action' => 'wpr_print_all_labels',
+                    '_wpnonce' => wp_create_nonce('wpr_print_all_labels'),
+                    'snapshot_order_ids' => implode(',', array_map('absint', $order_ids)),
+                ],
+                admin_url('admin-post.php')
+            );
+            wp_safe_redirect($redirect_url);
+            exit;
+        }
+
+        public function render_stats_report_from_log()
+        {
+            if (! current_user_can('manage_woocommerce')) {
+                wp_die('شما دسترسی لازم را ندارید.');
+            }
+
+            $log_id = isset($_GET['log_id']) ? absint($_GET['log_id']) : 0;
+            if (! $log_id) {
+                wp_die('شناسه لاگ نامعتبر است.');
+            }
+
+            check_admin_referer('wpr_stats_report_from_log_' . $log_id);
+            $log = $this->get_label_log($log_id);
+            if (! $log) {
+                wp_die('لاگ چاپ پیدا نشد.');
+            }
+
+            $order_ids = json_decode((string) $log->order_ids, true);
+            if (! is_array($order_ids)) {
+                $order_ids = [];
+            }
+
+            $redirect_url = add_query_arg(
+                [
+                    'action' => 'wpr_stats_report',
+                    '_wpnonce' => wp_create_nonce('wpr_stats_report'),
+                    'snapshot_order_ids' => implode(',', array_map('absint', $order_ids)),
+                ],
+                admin_url('admin-post.php')
+            );
+            wp_safe_redirect($redirect_url);
+            exit;
+        }
+
         public function save_address()
         {
             if (! current_user_can('manage_woocommerce')) {
@@ -785,5 +1064,6 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
         }
     }
 
+    register_activation_hook(__FILE__, ['WPR_Processing_Orders_Report', 'activate']);
     new WPR_Processing_Orders_Report();
 }
