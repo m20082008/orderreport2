@@ -578,7 +578,7 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
                     table{width:100%;border-collapse:collapse;font-size:11px;table-layout:fixed;}
                     td{border:1px solid #000;padding:2px 3px;line-height:1.35;vertical-align:middle;}
                     td.qty{width:42px;text-align:center;font-weight:bold;white-space:nowrap;}
-                    td.product-name{font-size:9px;white-space:nowrap;line-height:1.2;}
+                    td.product-name{font-size:10.5px;white-space:nowrap;line-height:1.6;}
                     .print-note{display:none;}
                     @media screen{
                         body{background:#f0f0f1;padding:10px;}
