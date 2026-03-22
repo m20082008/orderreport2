@@ -146,25 +146,7 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
 
         private function format_persian_datetime($timestamp)
         {
-            if (class_exists('IntlDateFormatter')) {
-                $formatter = new IntlDateFormatter(
-                    'fa_IR@calendar=persian',
-                    IntlDateFormatter::FULL,
-                    IntlDateFormatter::SHORT,
-                    wp_timezone(),
-                    IntlDateFormatter::TRADITIONAL,
-                    'yyyy/MM/dd HH:mm:ss'
-                );
-
-                if ($formatter) {
-                    $formatted = $formatter->format($timestamp);
-                    if ($formatted !== false) {
-                        return (string) $formatted;
-                    }
-                }
-            }
-
-            return wp_date('Y/m/d H:i:s', $timestamp);
+            return wp_date('Y/m/d H:i:s', (int) $timestamp, wp_timezone());
         }
 
         private function parse_mysql_datetime_to_wp_timestamp($mysql_datetime)
@@ -174,12 +156,12 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
                 return 0;
             }
 
-            try {
-                $datetime = new DateTimeImmutable($datetime_string, wp_timezone());
-                return $datetime->getTimestamp();
-            } catch (Exception $exception) {
+            $utc_timestamp = strtotime((string) $datetime_string . ' UTC');
+            if ($utc_timestamp === false) {
                 return 0;
             }
+
+            return (int) $utc_timestamp;
         }
 
         private function get_wp_local_timestamp()
@@ -325,7 +307,7 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
             $inserted = $wpdb->insert(
                 $table_name,
                 [
-                    'printed_at' => current_time('mysql'),
+                    'printed_at' => current_time('mysql', true),
                     'order_ids' => wp_json_encode(array_values($order_ids)),
                     'order_count' => count($order_ids),
                     'package_count' => isset($stats_data['address_packages_count']) ? (int) $stats_data['address_packages_count'] : 0,
@@ -813,7 +795,7 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
                     .label-box{height:100%;box-sizing:border-box;border:1px solid #000;border-radius:14px;padding:4px 6px;display:flex;flex-direction:column;gap:3px;}
                     .top-line{display:flex;justify-content:space-between;align-items:center;font-size:12px;font-weight:bold;}
                     .address-line{font-size:11px;line-height:1.4;min-height:30px;word-break:break-word;}
-                    .meta-line{display:flex;justify-content:space-between;gap:6px;font-size:11px;border-top:1px dotted #000;border-bottom:1px dotted #000;padding:3px 0;}
+                    .meta-line{display:flex;justify-content:space-between;gap:6px;font-size:11px;border-bottom:1px dotted #000;padding:3px 0;}
                     .items-line{font-size:11px;}
                     .order-pill{display:inline-block;border:1px solid #000;border-radius:999px;padding:1px 8px;min-width:54px;text-align:center;font-weight:bold;}
                     table{width:100%;border-collapse:collapse;font-size:11px;table-layout:fixed;}
@@ -911,7 +893,7 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
                     .label-box{height:100%;box-sizing:border-box;border:1px solid #000;border-radius:14px;padding:4px 6px;display:flex;flex-direction:column;gap:3px;}
                     .top-line{display:flex;justify-content:space-between;align-items:center;font-size:12px;font-weight:bold;}
                     .address-line{font-size:11px;line-height:1.4;min-height:30px;word-break:break-word;}
-                    .meta-line{display:flex;justify-content:space-between;gap:6px;font-size:11px;border-top:1px dotted #000;border-bottom:1px dotted #000;padding:3px 0;}
+                    .meta-line{display:flex;justify-content:space-between;gap:6px;font-size:11px;border-bottom:1px dotted #000;padding:3px 0;}
                     .items-line{font-size:11px;}
                     .order-pill{display:inline-block;border:1px solid #000;border-radius:999px;padding:1px 8px;min-width:54px;text-align:center;font-weight:bold;}
                     table{width:100%;border-collapse:collapse;font-size:11px;table-layout:fixed;}
