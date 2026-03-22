@@ -78,11 +78,16 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
                 if ($address_key === '') {
                     $address_key = '__EMPTY__ORDER__' . $order->get_id();
                 }
+                $is_duplicate_address = isset($address_packages[$address_key]);
                 $address_packages[$address_key] = true;
                 if (! isset($address_order_groups[$address_key])) {
                     $address_order_groups[$address_key] = [];
                 }
                 $address_order_groups[$address_key][] = (int) $order->get_id();
+
+                if ($is_duplicate_address) {
+                    continue;
+                }
 
                 foreach ($order->get_items() as $item) {
                     $item_name = $item->get_name();
@@ -96,7 +101,7 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
                 }
             }
 
-            arsort($product_totals);
+            $product_totals = $this->sort_report_products($product_totals);
 
             return [
                 'orders' => $orders,
@@ -104,7 +109,75 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
                 'total_items_count' => $total_items_count,
                 'address_packages_count' => count($address_packages),
                 'address_order_groups' => $address_order_groups,
+                'unique_orders_count' => count($address_packages),
             ];
+        }
+
+        private function normalize_product_title($title)
+        {
+            $normalized = trim((string) $title);
+            $normalized = str_replace(['ي', 'ك', '‌'], ['ی', 'ک', ' '], $normalized);
+            $normalized = preg_replace('/\s+/u', ' ', $normalized);
+
+            return mb_strtolower((string) $normalized);
+        }
+
+        private function find_matching_product_key($product_totals, $target_label)
+        {
+            $normalized_target = $this->normalize_product_title($target_label);
+
+            foreach (array_keys($product_totals) as $product_name) {
+                $normalized_name = $this->normalize_product_title($product_name);
+                if ($normalized_name === $normalized_target || mb_strpos($normalized_name, $normalized_target) !== false) {
+                    return $product_name;
+                }
+            }
+
+            return null;
+        }
+
+        private function sort_report_products($product_totals)
+        {
+            $priority_variants = [
+                'گرد (قطر ۱۴۰)',
+                '۴ نفره مربع (۱۴۰*۱۴۰)',
+                '۴ نفره مستطیل (۱۶۰*۱۳۰)',
+                '۴ نفره مستطیل (۱۵۰*۱۰۰)',
+                '۶ نفره (۲۱۷*۱۴۰)',
+                '۶ نفره (۱۸۰*۱۳۰)',
+                '۸ نفره (۲۵۰*۱۴۰)',
+                '۸ نفره (۲۶۰*۱۴۰)',
+                '۱۲ نفره (۳۰۰*۱۴۰)',
+                '۱۲ نفره (۳۳۰*۱۴۰)',
+            ];
+
+            $sorted = [];
+            $used_keys = [];
+
+            foreach ($priority_variants as $variant_label) {
+                $matched_key = $this->find_matching_product_key($product_totals, $variant_label);
+                if ($matched_key === null || isset($used_keys[$matched_key])) {
+                    continue;
+                }
+
+                $sorted[$matched_key] = $product_totals[$matched_key];
+                $used_keys[$matched_key] = true;
+            }
+
+            $remaining_products = [];
+            foreach ($product_totals as $product_name => $quantity) {
+                if (! isset($used_keys[$product_name])) {
+                    $remaining_products[$product_name] = $quantity;
+                }
+            }
+
+            arsort($remaining_products);
+
+            foreach ($remaining_products as $product_name => $quantity) {
+                $sorted[$product_name] = $quantity;
+            }
+
+            return $sorted;
         }
 
         private function get_readable_state($order, $state_code)
@@ -293,21 +366,18 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
             $product_totals = $stats_data['product_totals'];
             $total_items_count = $stats_data['total_items_count'];
             $address_packages_count = $stats_data['address_packages_count'];
+            $unique_orders_count = $stats_data['unique_orders_count'];
             $address_order_groups = $stats_data['address_order_groups'];
             $stats_generated_at = $this->format_persian_datetime(current_time('timestamp'));
             $total_orders_count = count($orders);
-            $same_address_package_instructions = [];
+            $has_duplicate_address_orders = false;
 
             foreach ($address_order_groups as $group_order_ids) {
                 if (count($group_order_ids) < 2) {
                     continue;
                 }
-
-                $order_ids_with_hash = array_map(static function ($order_id) {
-                    return '#' . (string) $order_id;
-                }, $group_order_ids);
-
-                $same_address_package_instructions[] = 'سفارش ' . implode(' و ', $order_ids_with_hash) . ' باهم بسته‌بندی شوند.';
+                $has_duplicate_address_orders = true;
+                break;
             }
 
             echo '<!DOCTYPE html><html lang="fa" dir="rtl"><head><meta charset="UTF-8">';
@@ -326,13 +396,12 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
             echo '<h1>گزارش آمار سفارش‌ها</h1>';
             echo '<p><strong>زمان گزارش:</strong> ' . esc_html($stats_generated_at) . '</p>';
             echo '<p><strong>تعداد کل سفارش‌ها:</strong> ' . esc_html((string) $total_orders_count) . '</p>';
-            echo '<p><strong>تعداد کل اقلام:</strong> ' . esc_html((string) $total_items_count) . '</p>';
+            echo '<p><strong>تعداد سفارش‌های قابل ارسال (بدون آدرس تکراری):</strong> ' . esc_html((string) $unique_orders_count) . '</p>';
+            echo '<p><strong>تعداد کل اقلام (بدون آدرس تکراری):</strong> ' . esc_html((string) $total_items_count) . '</p>';
             echo '<p><strong>تعداد بسته‌ها (بر اساس آدرس یکسان):</strong> ' . esc_html((string) $address_packages_count) . '</p>';
-            if (! empty($same_address_package_instructions)) {
-                echo '<h2>پیشنهاد بسته‌بندی سفارش‌های هم‌آدرس</h2>';
-                foreach ($same_address_package_instructions as $instruction) {
-                    echo '<p>' . esc_html($instruction) . '</p>';
-                }
+            if ($has_duplicate_address_orders) {
+                echo '<h2>راهنمای سفارش‌های هم‌آدرس</h2>';
+                echo '<p>باید به شعبه تهرانپارس تحویل گردد.</p>';
             }
 
             if (empty($product_totals)) {
