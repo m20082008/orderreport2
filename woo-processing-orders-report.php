@@ -470,6 +470,7 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
             add_action('admin_post_wpr_print_all_labels', [$this, 'render_print_all_labels_page']);
             add_action('admin_post_wpr_print_all_labels_from_log', [$this, 'render_print_all_labels_from_log']);
             add_action('admin_post_wpr_stats_report_from_log', [$this, 'render_stats_report_from_log']);
+            add_action('admin_post_wpr_delete_label_log', [$this, 'delete_label_log']);
         }
 
         public function register_menu()
@@ -632,9 +633,21 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
             $total_items_count = $stats_data['total_items_count'];
             $address_packages_count = $stats_data['address_packages_count'];
             $address_order_groups = $stats_data['address_order_groups'];
-            $stats_generated_at = $this->format_persian_datetime($this->get_wp_local_timestamp());
             $total_orders_count = count($orders);
             $same_address_package_instructions = [];
+            $report_log_datetime = '';
+
+            if ($report_log_id > 0) {
+                $report_log = $this->get_label_log($report_log_id);
+                if ($report_log) {
+                    $report_log_timestamp = $this->parse_mysql_datetime_to_wp_timestamp($report_log->printed_at);
+                    if ($report_log_timestamp) {
+                        $report_log_datetime = $this->format_persian_datetime($report_log_timestamp);
+                    } else {
+                        $report_log_datetime = (string) $report_log->printed_at;
+                    }
+                }
+            }
 
             foreach ($address_order_groups as $group_order_ids) {
                 if (count($group_order_ids) < 2) {
@@ -663,9 +676,12 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
             echo '<div class="report-wrap">';
             echo '<h1>گزارش آمار سفارش‌ها</h1>';
             if ($report_log_id > 0) {
-                echo '<p><strong>شماره لاگ:</strong> ' . esc_html((string) $report_log_id) . '</p>';
+                echo '<p><strong>شماره لاگ:</strong> ' . esc_html((string) $report_log_id);
+                if ($report_log_datetime !== '') {
+                    echo ' | <strong>تاریخ و ساعت لاگ:</strong> ' . esc_html($report_log_datetime);
+                }
+                echo '</p>';
             }
-            echo '<p><strong>زمان گزارش:</strong> ' . esc_html($stats_generated_at) . '</p>';
             echo '<p><strong>تعداد کل سفارش‌ها:</strong> ' . esc_html((string) $total_orders_count) . '</p>';
             echo '<p><strong>تعداد کل اقلام:</strong> ' . esc_html((string) $total_items_count) . '</p>';
             echo '<p><strong>تعداد بسته‌ها (بر اساس آدرس یکسان):</strong> ' . esc_html((string) $address_packages_count) . '</p>';
@@ -707,6 +723,9 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
 
             echo '<div class="wrap">';
             echo '<h1>لاگ چاپ لیبل کلی</h1>';
+            if (isset($_GET['wpr_log_deleted']) && $_GET['wpr_log_deleted'] === '1') {
+                echo '<div class="notice notice-success is-dismissible"><p>لاگ با موفقیت حذف شد.</p></div>';
+            }
             echo '<table class="widefat striped">';
             echo '<thead><tr>';
             echo '<th>شماره لاگ</th>';
@@ -715,10 +734,11 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
             echo '<th>تعداد بسته‌ها</th>';
             echo '<th>چاپ مجدد کلیه لیبل‌ها</th>';
             echo '<th>گزارش آمار</th>';
+            echo '<th>حذف لاگ</th>';
             echo '</tr></thead><tbody>';
 
             if (empty($logs)) {
-                echo '<tr><td colspan="6">هنوز لاگی برای چاپ لیبل کلی ثبت نشده است.</td></tr>';
+                echo '<tr><td colspan="7">هنوز لاگی برای چاپ لیبل کلی ثبت نشده است.</td></tr>';
             } else {
                 foreach ($logs as $log) {
                     $print_link = add_query_arg(
@@ -740,6 +760,14 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
 
                     $printed_timestamp = $this->parse_mysql_datetime_to_wp_timestamp($log->printed_at);
                     $printed_at = $printed_timestamp ? $this->format_persian_datetime($printed_timestamp) : (string) $log->printed_at;
+                    $delete_log_url = add_query_arg(
+                        [
+                            'action' => 'wpr_delete_label_log',
+                            'log_id' => (int) $log->id,
+                            '_wpnonce' => wp_create_nonce('wpr_delete_label_log_' . (int) $log->id),
+                        ],
+                        admin_url('admin-post.php')
+                    );
 
                     echo '<tr>';
                     echo '<td>' . esc_html((string) $log->id) . '</td>';
@@ -748,6 +776,7 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
                     echo '<td>' . esc_html((string) $log->package_count) . '</td>';
                     echo '<td><a class="button button-secondary" target="_blank" href="' . esc_url($print_link) . '">چاپ مجدد</a></td>';
                     echo '<td><a class="button button-secondary" target="_blank" href="' . esc_url($stats_link) . '">نمایش گزارش</a></td>';
+                    echo '<td><a class="button button-link-delete" href="' . esc_url($delete_log_url) . '" onclick="return confirm(\'آیا از حذف این لاگ مطمئن هستید؟\');">حذف لاگ</a></td>';
                     echo '</tr>';
                 }
             }
@@ -1037,6 +1066,36 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
                 ],
                 admin_url('admin-post.php')
             );
+            wp_safe_redirect($redirect_url);
+            exit;
+        }
+
+        public function delete_label_log()
+        {
+            if (! current_user_can('manage_woocommerce')) {
+                wp_die('شما دسترسی لازم را ندارید.');
+            }
+
+            $log_id = isset($_GET['log_id']) ? absint($_GET['log_id']) : 0;
+            if (! $log_id) {
+                wp_die('شناسه لاگ نامعتبر است.');
+            }
+
+            check_admin_referer('wpr_delete_label_log_' . $log_id);
+
+            global $wpdb;
+            $this->ensure_label_log_table_exists();
+            $table_name = $wpdb->prefix . self::LABEL_LOG_TABLE_SUFFIX;
+            $wpdb->delete($table_name, ['id' => $log_id], ['%d']);
+
+            $redirect_url = add_query_arg(
+                [
+                    'page' => 'wpr-processing-orders-report-logs',
+                    'wpr_log_deleted' => '1',
+                ],
+                admin_url('admin.php')
+            );
+
             wp_safe_redirect($redirect_url);
             exit;
         }
