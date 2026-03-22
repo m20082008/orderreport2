@@ -296,7 +296,7 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
             return (string) $trimmed_phone;
         }
 
-        private function get_order_label_pages($order, $first_label_max_rows = 4, $other_labels_max_rows = 3)
+        private function get_order_label_pages($order, $first_label_max_rows = 3, $other_labels_max_rows = 7)
         {
             $rows = [];
             foreach ($order->get_items() as $item) {
@@ -554,7 +554,8 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
             }
 
             $phone = $this->normalize_iran_phone($order->get_billing_phone());
-            $label_pages = $this->get_order_label_pages($order, 4, 3);
+            $label_pages = $this->get_order_label_pages($order, 3, 7);
+            $total_labels = count($label_pages);
             $total_order_items = 0;
             foreach ($order->get_items() as $item) {
                 $total_order_items += (int) $item->get_quantity();
@@ -588,13 +589,18 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
 
             foreach ($label_pages as $page_index => $page_rows) {
                 $is_first_page = $page_index === 0;
+                $label_number = $page_index + 1;
+                $label_number_text = '';
+                if ($total_labels > 1) {
+                    $label_number_text = ' (لیبل ' . (string) $label_number . ' از ' . (string) $total_labels . ')';
+                }
 
                 echo '<section class="sheet"><div class="label-box">';
 
                 if ($is_first_page) {
                     echo '<div class="top-line">';
                     echo '<span>گیرنده: ' . esc_html($full_name !== '' ? $full_name : '-') . '</span>';
-                    echo '<span>شماره سفارش: <span class="order-pill">' . esc_html((string) $order_id) . '</span></span>';
+                    echo '<span>شماره سفارش: <span class="order-pill">' . esc_html((string) $order_id) . '</span>' . esc_html($label_number_text) . '</span>';
                     echo '</div>';
                     echo '<div class="address-line">آدرس: ' . esc_html($full_address !== '' ? $full_address : '-') . '</div>';
                     echo '<div class="meta-line">';
@@ -603,7 +609,7 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
                     echo '</div>';
                     echo '<div class="items-line">تعداد اقلام: ' . esc_html((string) $total_order_items) . ' عدد</div>';
                 } else {
-                    echo '<div class="top-line"><span>ادامه سفارش #' . esc_html((string) $order_id) . '</span></div>';
+                    echo '<div class="top-line"><span>ادامه سفارش #' . esc_html((string) $order_id) . esc_html($label_number_text) . '</span></div>';
                 }
 
                 echo '<table><tbody>';
