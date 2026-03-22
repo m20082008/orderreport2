@@ -49,6 +49,7 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
             $product_totals = [];
             $total_items_count = 0;
             $address_packages = [];
+            $address_order_groups = [];
 
             foreach ($orders as $order) {
                 $state = $order->get_shipping_state();
@@ -78,6 +79,10 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
                     $address_key = '__EMPTY__ORDER__' . $order->get_id();
                 }
                 $address_packages[$address_key] = true;
+                if (! isset($address_order_groups[$address_key])) {
+                    $address_order_groups[$address_key] = [];
+                }
+                $address_order_groups[$address_key][] = (int) $order->get_id();
 
                 foreach ($order->get_items() as $item) {
                     $item_name = $item->get_name();
@@ -98,6 +103,7 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
                 'product_totals' => $product_totals,
                 'total_items_count' => $total_items_count,
                 'address_packages_count' => count($address_packages),
+                'address_order_groups' => $address_order_groups,
             ];
         }
 
@@ -172,7 +178,7 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
             echo '<thead><tr>';
             echo '<th>شماره سفارش</th>';
             echo '<th>نام و نام خانوادگی</th>';
-            echo '<th>آدرس (قابل ویرایش)</th>';
+            echo '<th style="width:42%;">آدرس (قابل ویرایش)</th>';
             echo '<th>کد پستی</th>';
             echo '<th>تلفن</th>';
             echo '<th>یادداشت مشتری</th>';
@@ -229,13 +235,17 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
                     echo '<input type="hidden" name="action" value="wpr_save_address" />';
                     echo '<input type="hidden" name="order_id" value="' . esc_attr((string) $order_id) . '" />';
 
-                    echo '<textarea name="full_shipping_address" rows="3" style="width:100%;direction:rtl;" placeholder="نام دقیق استان - نام شهر - آدرس ۱- آدرس ۲- شماره پلاک">' . esc_textarea((string) $full_address) . '</textarea>';
-                    echo '</td>';
-
                     $postcode = $order->get_shipping_postcode();
                     if (empty($postcode)) {
                         $postcode = $order->get_billing_postcode();
                     }
+
+                    $full_address_char_count = mb_strlen((string) $full_address);
+                    $address_error_threshold = empty($postcode) ? 163 : 134;
+                    $address_textarea_border = $full_address_char_count > $address_error_threshold ? 'border:2px solid #d63638;' : 'border:1px solid #8c8f94;';
+
+                    echo '<textarea name="full_shipping_address" rows="3" style="width:100%;min-width:520px;direction:rtl;' . esc_attr($address_textarea_border) . '" placeholder="نام دقیق استان - نام شهر - آدرس ۱- آدرس ۲- شماره پلاک">' . esc_textarea((string) $full_address) . '</textarea>';
+                    echo '</td>';
 
                     $phone = $order->get_billing_phone();
                     $customer_note = $order->get_customer_note();
@@ -283,8 +293,22 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
             $product_totals = $stats_data['product_totals'];
             $total_items_count = $stats_data['total_items_count'];
             $address_packages_count = $stats_data['address_packages_count'];
+            $address_order_groups = $stats_data['address_order_groups'];
             $stats_generated_at = $this->format_persian_datetime(current_time('timestamp'));
             $total_orders_count = count($orders);
+            $same_address_package_instructions = [];
+
+            foreach ($address_order_groups as $group_order_ids) {
+                if (count($group_order_ids) < 2) {
+                    continue;
+                }
+
+                $order_ids_with_hash = array_map(static function ($order_id) {
+                    return '#' . (string) $order_id;
+                }, $group_order_ids);
+
+                $same_address_package_instructions[] = 'سفارش ' . implode(' و ', $order_ids_with_hash) . ' باهم بسته‌بندی شوند.';
+            }
 
             echo '<!DOCTYPE html><html lang="fa" dir="rtl"><head><meta charset="UTF-8">';
             echo '<meta name="viewport" content="width=device-width, initial-scale=1.0">';
@@ -304,6 +328,12 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
             echo '<p><strong>تعداد کل سفارش‌ها:</strong> ' . esc_html((string) $total_orders_count) . '</p>';
             echo '<p><strong>تعداد کل اقلام:</strong> ' . esc_html((string) $total_items_count) . '</p>';
             echo '<p><strong>تعداد بسته‌ها (بر اساس آدرس یکسان):</strong> ' . esc_html((string) $address_packages_count) . '</p>';
+            if (! empty($same_address_package_instructions)) {
+                echo '<h2>پیشنهاد بسته‌بندی سفارش‌های هم‌آدرس</h2>';
+                foreach ($same_address_package_instructions as $instruction) {
+                    echo '<p>' . esc_html($instruction) . '</p>';
+                }
+            }
 
             if (empty($product_totals)) {
                 echo '<p>برای این بازه سفارشی ثبت نشده است.</p>';
