@@ -14,6 +14,32 @@ if (! defined('ABSPATH')) {
 if (! class_exists('WPR_Processing_Orders_Report')) {
     class WPR_Processing_Orders_Report
     {
+        private function get_readable_state($order, $state_code)
+        {
+            if ($state_code === null || $state_code === '') {
+                return '';
+            }
+
+            if (! function_exists('WC') || ! WC() || ! isset(WC()->countries)) {
+                return (string) $state_code;
+            }
+
+            $country = $order->get_shipping_country();
+            if (empty($country)) {
+                $country = $order->get_billing_country();
+            }
+            if (empty($country)) {
+                $country = WC()->countries->get_base_country();
+            }
+
+            $states_for_country = WC()->countries->get_states($country);
+            if (is_array($states_for_country) && isset($states_for_country[$state_code])) {
+                return (string) $states_for_country[$state_code];
+            }
+
+            return (string) $state_code;
+        }
+
         public function __construct()
         {
             add_action('admin_menu', [$this, 'register_menu']);
@@ -88,6 +114,8 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
                         $address_1 = $order->get_billing_address_1();
                         $address_2 = $order->get_billing_address_2();
                     }
+
+                    $state = $this->get_readable_state($order, $state);
 
                     $full_address = trim(implode(' - ', array_filter([
                         $state,
