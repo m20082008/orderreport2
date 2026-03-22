@@ -14,6 +14,96 @@ if (! defined('ABSPATH')) {
 if (! class_exists('WPR_Processing_Orders_Report')) {
     class WPR_Processing_Orders_Report
     {
+        private function normalize_product_name_for_sort($product_name)
+        {
+            $normalized = strtr((string) $product_name, [
+                '۰' => '0',
+                '۱' => '1',
+                '۲' => '2',
+                '۳' => '3',
+                '۴' => '4',
+                '۵' => '5',
+                '۶' => '6',
+                '۷' => '7',
+                '۸' => '8',
+                '۹' => '9',
+                '٠' => '0',
+                '١' => '1',
+                '٢' => '2',
+                '٣' => '3',
+                '٤' => '4',
+                '٥' => '5',
+                '٦' => '6',
+                '٧' => '7',
+                '٨' => '8',
+                '٩' => '9',
+            ]);
+
+            $normalized = preg_replace('/\s+/u', ' ', trim($normalized));
+
+            if (function_exists('mb_strtolower')) {
+                return (string) mb_strtolower((string) $normalized, 'UTF-8');
+            }
+
+            return (string) strtolower((string) $normalized);
+        }
+
+        private function get_product_display_priority($product_name)
+        {
+            $normalized_name = $this->normalize_product_name_for_sort($product_name);
+
+            $contains_round_keyword = function_exists('mb_strpos')
+                ? mb_strpos($normalized_name, 'گرد') !== false
+                : strpos($normalized_name, 'گرد') !== false;
+            if ($contains_round_keyword) {
+                return 1;
+            }
+
+            if (preg_match('/\b4\s*نفره\s*مربع\b/u', $normalized_name)) {
+                return 2;
+            }
+
+            if (preg_match('/\b4\s*نفره\s*مستطیل\b/u', $normalized_name)) {
+                return 3;
+            }
+
+            if (preg_match('/\b6\s*نفره\b/u', $normalized_name)) {
+                return 4;
+            }
+
+            if (preg_match('/\b8\s*نفره\b/u', $normalized_name)) {
+                return 5;
+            }
+
+            if (preg_match('/\b12\s*نفره\b/u', $normalized_name)) {
+                return 6;
+            }
+
+            return 7;
+        }
+
+        private function sort_product_totals_for_stats_report($product_totals)
+        {
+            uksort($product_totals, function ($left_name, $right_name) use ($product_totals) {
+                $left_priority = $this->get_product_display_priority($left_name);
+                $right_priority = $this->get_product_display_priority($right_name);
+
+                if ($left_priority !== $right_priority) {
+                    return $left_priority <=> $right_priority;
+                }
+
+                $left_quantity = isset($product_totals[$left_name]) ? (int) $product_totals[$left_name] : 0;
+                $right_quantity = isset($product_totals[$right_name]) ? (int) $product_totals[$right_name] : 0;
+                if ($left_quantity !== $right_quantity) {
+                    return $right_quantity <=> $left_quantity;
+                }
+
+                return strnatcasecmp((string) $left_name, (string) $right_name);
+            });
+
+            return $product_totals;
+        }
+
         private function format_persian_datetime($timestamp)
         {
             if (class_exists('IntlDateFormatter')) {
@@ -96,7 +186,7 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
                 }
             }
 
-            arsort($product_totals);
+            $product_totals = $this->sort_product_totals_for_stats_report($product_totals);
 
             return [
                 'orders' => $orders,
