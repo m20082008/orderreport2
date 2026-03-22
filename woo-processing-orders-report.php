@@ -41,6 +41,19 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
             dbDelta($sql);
         }
 
+        private function ensure_label_log_table_exists()
+        {
+            global $wpdb;
+
+            $table_name = $wpdb->prefix . self::LABEL_LOG_TABLE_SUFFIX;
+            $table_found = $wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $table_name));
+            if ($table_found === $table_name) {
+                return;
+            }
+
+            self::activate();
+        }
+
         private function normalize_product_name_for_sort($product_name)
         {
             $normalized = strtr((string) $product_name, [
@@ -284,6 +297,7 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
         private function create_label_print_log($stats_data, $order_ids)
         {
             global $wpdb;
+            $this->ensure_label_log_table_exists();
 
             $table_name = $wpdb->prefix . self::LABEL_LOG_TABLE_SUFFIX;
             $current_user_id = get_current_user_id();
@@ -313,6 +327,7 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
         private function get_label_log($log_id)
         {
             global $wpdb;
+            $this->ensure_label_log_table_exists();
             $table_name = $wpdb->prefix . self::LABEL_LOG_TABLE_SUFFIX;
 
             return $wpdb->get_row($wpdb->prepare("SELECT * FROM {$table_name} WHERE id = %d", $log_id));
@@ -680,6 +695,7 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
             }
 
             global $wpdb;
+            $this->ensure_label_log_table_exists();
             $table_name = $wpdb->prefix . self::LABEL_LOG_TABLE_SUFFIX;
             $logs = $wpdb->get_results("SELECT * FROM {$table_name} ORDER BY printed_at DESC, id DESC LIMIT 500");
 
