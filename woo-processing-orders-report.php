@@ -622,6 +622,7 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
 
             $stats_data = $this->get_processing_stats_data();
             $snapshot_order_ids = $this->get_snapshot_order_ids_from_request($_GET);
+            $report_log_id = isset($_GET['log_id']) ? absint($_GET['log_id']) : 0;
             if (! empty($snapshot_order_ids)) {
                 $snapshot_orders = $this->get_orders_by_ids($snapshot_order_ids);
                 $stats_data = $this->build_stats_data_from_orders($snapshot_orders);
@@ -661,6 +662,9 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
 
             echo '<div class="report-wrap">';
             echo '<h1>گزارش آمار سفارش‌ها</h1>';
+            if ($report_log_id > 0) {
+                echo '<p><strong>شماره لاگ:</strong> ' . esc_html((string) $report_log_id) . '</p>';
+            }
             echo '<p><strong>زمان گزارش:</strong> ' . esc_html($stats_generated_at) . '</p>';
             echo '<p><strong>تعداد کل سفارش‌ها:</strong> ' . esc_html((string) $total_orders_count) . '</p>';
             echo '<p><strong>تعداد کل اقلام:</strong> ' . esc_html((string) $total_items_count) . '</p>';
@@ -699,12 +703,13 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
             global $wpdb;
             $this->ensure_label_log_table_exists();
             $table_name = $wpdb->prefix . self::LABEL_LOG_TABLE_SUFFIX;
-            $logs = $wpdb->get_results("SELECT * FROM {$table_name} ORDER BY printed_at DESC, id DESC LIMIT 500");
+            $logs = $wpdb->get_results("SELECT * FROM {$table_name} ORDER BY id DESC LIMIT 500");
 
             echo '<div class="wrap">';
             echo '<h1>لاگ چاپ لیبل کلی</h1>';
             echo '<table class="widefat striped">';
             echo '<thead><tr>';
+            echo '<th>شماره لاگ</th>';
             echo '<th>تاریخ چاپ لیبل</th>';
             echo '<th>تعداد سفارشات</th>';
             echo '<th>تعداد بسته‌ها</th>';
@@ -713,7 +718,7 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
             echo '</tr></thead><tbody>';
 
             if (empty($logs)) {
-                echo '<tr><td colspan="5">هنوز لاگی برای چاپ لیبل کلی ثبت نشده است.</td></tr>';
+                echo '<tr><td colspan="6">هنوز لاگی برای چاپ لیبل کلی ثبت نشده است.</td></tr>';
             } else {
                 foreach ($logs as $log) {
                     $print_link = add_query_arg(
@@ -737,6 +742,7 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
                     $printed_at = $printed_timestamp ? $this->format_persian_datetime($printed_timestamp) : (string) $log->printed_at;
 
                     echo '<tr>';
+                    echo '<td>' . esc_html((string) $log->id) . '</td>';
                     echo '<td>' . esc_html($printed_at) . '</td>';
                     echo '<td>' . esc_html((string) $log->order_count) . '</td>';
                     echo '<td>' . esc_html((string) $log->package_count) . '</td>';
@@ -1027,6 +1033,7 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
                     'action' => 'wpr_stats_report',
                     '_wpnonce' => wp_create_nonce('wpr_stats_report'),
                     'snapshot_order_ids' => implode(',', array_map('absint', $order_ids)),
+                    'log_id' => $log_id,
                 ],
                 admin_url('admin-post.php')
             );
