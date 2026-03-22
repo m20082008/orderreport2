@@ -77,6 +77,13 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
                 'order' => 'DESC',
             ]);
 
+            $show_stats = isset($_GET['wpr_show_stats']) && $_GET['wpr_show_stats'] === '1';
+            $stats_generated_at = current_time('Y-m-d H:i:s');
+            $product_totals = [];
+            $total_items_count = 0;
+            $total_orders_count = count($orders);
+            $address_packages = [];
+
             echo '<div class="wrap">';
             echo '<h1>گزارش سفارش‌های در حال انجام</h1>';
 
@@ -91,13 +98,14 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
             echo '<th>آدرس (قابل ویرایش)</th>';
             echo '<th>کد پستی</th>';
             echo '<th>تلفن</th>';
+            echo '<th>یادداشت مشتری</th>';
             echo '<th>کالاها</th>';
             echo '<th>تعداد</th>';
             echo '<th>اقدام</th>';
             echo '</tr></thead><tbody>';
 
             if (empty($orders)) {
-                echo '<tr><td colspan="8">سفارشی با وضعیت در حال انجام پیدا نشد.</td></tr>';
+                echo '<tr><td colspan="9">سفارشی با وضعیت در حال انجام پیدا نشد.</td></tr>';
             } else {
                 foreach ($orders as $order) {
                     $order_id = $order->get_id();
@@ -126,11 +134,25 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
                         return $value !== null && $value !== '';
                     })));
 
+                    $address_key = preg_replace('/\s+/u', ' ', trim((string) $full_address));
+                    if ($address_key === '') {
+                        $address_key = '__EMPTY__ORDER__' . $order_id;
+                    }
+                    $address_packages[$address_key] = true;
+
                     $items_column = [];
                     $qty_column = [];
                     foreach ($order->get_items() as $item) {
                         $items_column[] = esc_html($item->get_name());
-                        $qty_column[] = esc_html((string) $item->get_quantity());
+                        $item_quantity = (int) $item->get_quantity();
+                        $qty_column[] = esc_html((string) $item_quantity);
+
+                        $item_name = $item->get_name();
+                        if (! isset($product_totals[$item_name])) {
+                            $product_totals[$item_name] = 0;
+                        }
+                        $product_totals[$item_name] += $item_quantity;
+                        $total_items_count += $item_quantity;
                     }
 
                     echo '<tr>';
@@ -153,9 +175,11 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
                     }
 
                     $phone = $order->get_billing_phone();
+                    $customer_note = $order->get_customer_note();
 
                     echo '<td>' . esc_html((string) $postcode) . '</td>';
                     echo '<td>' . esc_html((string) $phone) . '</td>';
+                    echo '<td>' . esc_html((string) $customer_note) . '</td>';
                     echo '<td>' . wp_kses_post(implode('<br>', $items_column)) . '</td>';
                     echo '<td>' . wp_kses_post(implode('<br>', $qty_column)) . '</td>';
                     echo '<td>';
@@ -170,8 +194,39 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
             echo '</tbody></table>';
             echo '<div style="margin-top:16px;display:flex;gap:8px;align-items:center;">';
             echo '<button type="button" class="button button-secondary">چاپ کلیه لیبل‌ها</button>';
-            echo '<button type="button" class="button button-secondary">گزارش آمار</button>';
+            echo '<form method="get" action="' . esc_url(admin_url('admin.php')) . '" style="margin:0;">';
+            echo '<input type="hidden" name="page" value="wpr-processing-orders-report" />';
+            echo '<input type="hidden" name="wpr_show_stats" value="1" />';
+            echo '<button type="submit" class="button button-secondary">گزارش آمار</button>';
+            echo '</form>';
             echo '</div>';
+
+            if ($show_stats) {
+                arsort($product_totals);
+
+                echo '<div style="margin-top:16px;padding:16px;background:#fff;border:1px solid #ccd0d4;">';
+                echo '<h2 style="margin-top:0;">گزارش آمار سفارش‌ها</h2>';
+                echo '<p><strong>زمان گزارش:</strong> ' . esc_html($stats_generated_at) . '</p>';
+                echo '<p><strong>تعداد کل سفارش‌ها:</strong> ' . esc_html((string) $total_orders_count) . '</p>';
+                echo '<p><strong>تعداد کل اقلام:</strong> ' . esc_html((string) $total_items_count) . '</p>';
+                echo '<p><strong>تعداد بسته‌ها (بر اساس آدرس یکسان):</strong> ' . esc_html((string) count($address_packages)) . '</p>';
+
+                if (empty($product_totals)) {
+                    echo '<p>برای این بازه سفارشی ثبت نشده است.</p>';
+                } else {
+                    echo '<h3>تجمیع محصولات</h3>';
+                    echo '<table class="widefat striped" style="max-width:900px;">';
+                    echo '<thead><tr><th>محصول</th><th>تعداد کل سفارش داده‌شده</th></tr></thead><tbody>';
+                    foreach ($product_totals as $product_name => $quantity) {
+                        echo '<tr>';
+                        echo '<td>' . esc_html((string) $product_name) . '</td>';
+                        echo '<td>' . esc_html((string) $quantity) . '</td>';
+                        echo '</tr>';
+                    }
+                    echo '</tbody></table>';
+                }
+                echo '</div>';
+            }
             echo '</div>';
         }
 
