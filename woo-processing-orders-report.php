@@ -603,6 +603,7 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
             echo '<form method="get" action="' . esc_url(admin_url('admin-post.php')) . '" style="margin:0;" target="_blank">';
             echo '<input type="hidden" name="action" value="wpr_stats_report" />';
             echo '<input type="hidden" name="_wpnonce" value="' . esc_attr(wp_create_nonce('wpr_stats_report')) . '" />';
+            echo '<input type="hidden" name="snapshot_order_ids" value="' . esc_attr(implode(',', $snapshot_order_ids)) . '" />';
             echo '<button type="submit" class="button button-secondary">گزارش آمار</button>';
             echo '</form>';
             echo '</div>';
