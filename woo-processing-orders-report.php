@@ -168,6 +168,10 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
             }
 
             echo '</tbody></table>';
+            echo '<div style="margin-top:16px;display:flex;gap:8px;align-items:center;">';
+            echo '<button type="button" class="button button-secondary">چاپ کلیه لیبل‌ها</button>';
+            echo '<button type="button" class="button button-secondary">گزارش آمار</button>';
+            echo '</div>';
             echo '</div>';
         }
 
