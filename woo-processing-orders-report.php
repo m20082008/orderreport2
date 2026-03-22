@@ -167,6 +167,21 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
             return wp_date('Y/m/d H:i:s', $timestamp);
         }
 
+        private function parse_mysql_datetime_to_wp_timestamp($mysql_datetime)
+        {
+            $datetime_string = trim((string) $mysql_datetime);
+            if ($datetime_string === '') {
+                return 0;
+            }
+
+            try {
+                $datetime = new DateTimeImmutable($datetime_string, wp_timezone());
+                return $datetime->getTimestamp();
+            } catch (Exception $exception) {
+                return 0;
+            }
+        }
+
         private function get_processing_stats_data()
         {
             $orders = wc_get_orders([
@@ -731,7 +746,7 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
                         admin_url('admin-post.php')
                     );
 
-                    $printed_timestamp = strtotime((string) $log->printed_at);
+                    $printed_timestamp = $this->parse_mysql_datetime_to_wp_timestamp($log->printed_at);
                     $printed_at = $printed_timestamp ? $this->format_persian_datetime($printed_timestamp) : (string) $log->printed_at;
 
                     echo '<tr>';
@@ -828,8 +843,8 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
                     echo '<div class="meta-line">';
                     echo '<span>کد پستی: ' . esc_html((string) $postcode !== '' ? (string) $postcode : '-') . '</span>';
                     echo '<span>شماره تماس: ' . esc_html((string) $phone !== '' ? (string) $phone : '-') . '</span>';
+                    echo '<span>تعداد اقلام: ' . esc_html((string) $total_order_items) . ' عدد</span>';
                     echo '</div>';
-                    echo '<div class="items-line">تعداد اقلام: ' . esc_html((string) $total_order_items) . ' عدد</div>';
                 } else {
                     echo '<div class="top-line"><span>ادامه سفارش #' . esc_html((string) $order_id) . esc_html($label_number_text) . '</span></div>';
                 }
@@ -942,8 +957,8 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
                         echo '<div class="meta-line">';
                         echo '<span>کد پستی: ' . esc_html((string) $postcode !== '' ? (string) $postcode : '-') . '</span>';
                         echo '<span>شماره تماس: ' . esc_html((string) $phone !== '' ? (string) $phone : '-') . '</span>';
+                        echo '<span>تعداد اقلام: ' . esc_html((string) $total_order_items) . ' عدد</span>';
                         echo '</div>';
-                        echo '<div class="items-line">تعداد اقلام: ' . esc_html((string) $total_order_items) . ' عدد</div>';
                     } else {
                         echo '<div class="top-line"><span>ادامه سفارش #' . esc_html((string) $order_id) . esc_html($label_number_text) . '</span></div>';
                     }
