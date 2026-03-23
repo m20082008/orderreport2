@@ -468,6 +468,7 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
             add_action('admin_post_wpr_stats_report', [$this, 'render_stats_report_page']);
             add_action('admin_post_wpr_print_label', [$this, 'render_print_label_page']);
             add_action('admin_post_wpr_print_all_labels', [$this, 'render_print_all_labels_page']);
+            add_action('admin_post_wpr_print_all_labels_and_complete', [$this, 'render_print_all_labels_and_complete_page']);
             add_action('admin_post_wpr_print_all_labels_from_log', [$this, 'render_print_all_labels_from_log']);
             add_action('admin_post_wpr_stats_report_from_log', [$this, 'render_stats_report_from_log']);
             add_action('admin_post_wpr_delete_label_log', [$this, 'delete_label_log']);
@@ -599,6 +600,12 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
             }, $orders);
             echo '<input type="hidden" name="snapshot_order_ids" value="' . esc_attr(implode(',', $snapshot_order_ids)) . '" />';
             echo '<button type="submit" class="button button-secondary">چاپ لیبل کلی</button>';
+            echo '</form>';
+            echo '<form method="get" action="' . esc_url(admin_url('admin-post.php')) . '" style="margin:0;" target="_blank">';
+            echo '<input type="hidden" name="action" value="wpr_print_all_labels_and_complete" />';
+            echo '<input type="hidden" name="_wpnonce" value="' . esc_attr(wp_create_nonce('wpr_print_all_labels_and_complete')) . '" />';
+            echo '<input type="hidden" name="snapshot_order_ids" value="' . esc_attr(implode(',', $snapshot_order_ids)) . '" />';
+            echo '<button type="submit" class="button button-primary">چاپ لیبل ها و بستن سفارشات</button>';
             echo '</form>';
             echo '<form method="get" action="' . esc_url(admin_url('admin-post.php')) . '" style="margin:0;" target="_blank">';
             echo '<input type="hidden" name="action" value="wpr_stats_report" />';
@@ -882,6 +889,130 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
                 echo '</tbody></table>';
 
                 echo '</div></section>';
+            }
+
+            echo '</body></html>';
+            exit;
+        }
+
+        public function render_print_all_labels_and_complete_page()
+        {
+            if (! current_user_can('manage_woocommerce')) {
+                wp_die('شما دسترسی لازم را ندارید.');
+            }
+
+            check_admin_referer('wpr_print_all_labels_and_complete');
+
+            if (! class_exists('WooCommerce')) {
+                wp_die('ووکامرس فعال نیست.');
+            }
+
+            $snapshot_order_ids = $this->get_snapshot_order_ids_from_request($_GET);
+            if (empty($snapshot_order_ids)) {
+                $stats_data = $this->get_processing_stats_data();
+            } else {
+                $snapshot_orders = $this->get_orders_by_ids($snapshot_order_ids);
+                $stats_data = $this->build_stats_data_from_orders($snapshot_orders);
+            }
+            $orders = $stats_data['orders'];
+
+            if (empty($orders)) {
+                wp_die('سفارشی برای چاپ لیبل وجود ندارد.');
+            }
+
+            $order_ids_for_log = array_map(static function ($order) {
+                return (int) $order->get_id();
+            }, $orders);
+            $this->create_label_print_log($stats_data, $order_ids_for_log);
+
+            foreach ($orders as $order) {
+                if (! $order instanceof WC_Order) {
+                    continue;
+                }
+
+                if ($order->get_status() !== 'completed') {
+                    $order->update_status('completed', 'تکمیل خودکار پس از چاپ لیبل‌ها از گزارش سفارش‌ها.', true);
+                }
+            }
+
+            echo '<!DOCTYPE html><html lang="fa" dir="rtl"><head><meta charset="UTF-8">';
+            echo '<meta name="viewport" content="width=device-width, initial-scale=1.0">';
+            echo '<title>چاپ لیبل کلی سفارش‌ها (همراه با بستن سفارش)</title>';
+            echo '<style>
+                    @page{size:3.94in 1.97in;margin:0;}
+                    body{font-family:tahoma,Arial,sans-serif;background:#fff;margin:0;padding:0;color:#000;}
+                    .sheet{width:3.94in;height:1.97in;box-sizing:border-box;padding:4px;page-break-after:always;overflow:hidden;}
+                    .sheet:last-child{page-break-after:auto;}
+                    .label-box{height:100%;box-sizing:border-box;border:1px solid #000;border-radius:14px;padding:4px 6px;display:flex;flex-direction:column;gap:3px;}
+                    .top-line{display:flex;justify-content:space-between;align-items:center;font-size:12px;font-weight:bold;}
+                    .address-line{font-size:11px;line-height:1.4;min-height:30px;word-break:break-word;}
+                    .meta-line{display:flex;justify-content:space-between;gap:6px;font-size:11px;border-bottom:1px dotted #000;padding:3px 0;}
+                    .items-line{font-size:11px;}
+                    .order-pill{display:inline-block;border:1px solid #000;border-radius:999px;padding:1px 8px;min-width:54px;text-align:center;font-weight:bold;}
+                    table{width:100%;border-collapse:collapse;font-size:11px;table-layout:fixed;}
+                    td{border:1px solid #000;padding:2px 3px;line-height:1.35;vertical-align:middle;}
+                    td.qty{width:42px;text-align:center;font-weight:bold;white-space:nowrap;}
+                    td.product-name{font-size:10.5px;white-space:nowrap;line-height:1.6;}
+                    .print-note{display:none;}
+                    @media screen{
+                        body{background:#f0f0f1;padding:10px;}
+                        .sheet{margin:0 auto 8px auto;background:#fff;box-shadow:0 2px 8px rgba(0,0,0,.15);}
+                        .print-note{display:block;margin:0 auto 12px auto;text-align:center;font-size:12px;}
+                    }
+                  </style></head><body>';
+            echo '<p class="print-note">برای چاپ لیبل‌ها از Ctrl+P استفاده کنید. وضعیت سفارش‌های این لیست به «تکمیل‌شده» تغییر کرد.</p>';
+
+            foreach ($orders as $order) {
+                $order_id = $order->get_id();
+                $full_name = trim($order->get_billing_first_name() . ' ' . $order->get_billing_last_name());
+                $full_address = $this->get_full_shipping_address($order);
+                $postcode = $order->get_shipping_postcode();
+                if (empty($postcode)) {
+                    $postcode = $order->get_billing_postcode();
+                }
+
+                $phone = $this->normalize_iran_phone($order->get_billing_phone());
+                $label_pages = $this->get_order_label_pages($order, 3, 7);
+                $total_labels = count($label_pages);
+                $total_order_items = 0;
+                foreach ($order->get_items() as $item) {
+                    $total_order_items += (int) $item->get_quantity();
+                }
+
+                foreach ($label_pages as $page_index => $page_rows) {
+                    $is_first_page = $page_index === 0;
+                    $label_number = $page_index + 1;
+                    $label_number_text = '';
+                    if ($total_labels > 1) {
+                        $label_number_text = ' (لیبل ' . (string) $label_number . ' از ' . (string) $total_labels . ')';
+                    }
+
+                    echo '<section class="sheet"><div class="label-box">';
+                    if ($is_first_page) {
+                        echo '<div class="top-line">';
+                        echo '<span>گیرنده: ' . esc_html($full_name !== '' ? $full_name : '-') . '</span>';
+                        echo '<span>شماره سفارش: <span class="order-pill">' . esc_html((string) $order_id) . '</span>' . esc_html($label_number_text) . '</span>';
+                        echo '</div>';
+                        echo '<div class="address-line">آدرس: ' . esc_html($full_address !== '' ? $full_address : '-') . '</div>';
+                        echo '<div class="meta-line">';
+                        echo '<span>کد پستی: ' . esc_html((string) $postcode !== '' ? (string) $postcode : '-') . '</span>';
+                        echo '<span>شماره تماس: ' . esc_html((string) $phone !== '' ? (string) $phone : '-') . '</span>';
+                        echo '<span>تعداد اقلام: ' . esc_html((string) $total_order_items) . ' عدد</span>';
+                        echo '</div>';
+                    } else {
+                        echo '<div class="top-line"><span>ادامه سفارش #' . esc_html((string) $order_id) . esc_html($label_number_text) . '</span></div>';
+                    }
+
+                    echo '<table><tbody>';
+                    foreach ($page_rows as $row) {
+                        echo '<tr>';
+                        echo '<td class="qty">' . esc_html((string) $row['qty']) . ' عدد</td>';
+                        echo '<td class="product-name">' . esc_html((string) $row['name']) . '</td>';
+                        echo '</tr>';
+                    }
+                    echo '</tbody></table>';
+                    echo '</div></section>';
+                }
             }
 
             echo '</body></html>';
