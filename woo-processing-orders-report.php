@@ -477,11 +477,13 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
             add_action('admin_menu', [$this, 'register_menu']);
             add_action('admin_post_wpr_save_address', [$this, 'save_address']);
             add_action('admin_post_wpr_stats_report', [$this, 'render_stats_report_page']);
+            add_action('admin_post_wpr_print_post_receipt', [$this, 'render_post_receipt_page']);
             add_action('admin_post_wpr_print_label', [$this, 'render_print_label_page']);
             add_action('admin_post_wpr_print_all_labels', [$this, 'render_print_all_labels_page']);
             add_action('admin_post_wpr_print_all_labels_and_complete', [$this, 'render_print_all_labels_and_complete_page']);
             add_action('admin_post_wpr_print_all_labels_from_log', [$this, 'render_print_all_labels_from_log']);
             add_action('admin_post_wpr_stats_report_from_log', [$this, 'render_stats_report_from_log']);
+            add_action('admin_post_wpr_print_post_receipt_from_log', [$this, 'render_post_receipt_from_log']);
             add_action('admin_post_wpr_delete_label_log', [$this, 'delete_label_log']);
         }
 
@@ -628,8 +630,111 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
             echo '<input type="hidden" name="snapshot_order_ids" value="' . esc_attr(implode(',', $snapshot_order_ids)) . '" />';
             echo '<button type="submit" class="button button-secondary">گزارش آمار</button>';
             echo '</form>';
+            echo '<form method="get" action="' . esc_url(admin_url('admin-post.php')) . '" style="margin:0;" target="_blank">';
+            echo '<input type="hidden" name="action" value="wpr_print_post_receipt" />';
+            echo '<input type="hidden" name="_wpnonce" value="' . esc_attr(wp_create_nonce('wpr_print_post_receipt')) . '" />';
+            echo '<input type="hidden" name="snapshot_order_ids" value="' . esc_attr(implode(',', $snapshot_order_ids)) . '" />';
+            echo '<button type="submit" class="button button-secondary">چاپ رسید پست</button>';
+            echo '</form>';
             echo '</div>';
             echo '</div>';
+        }
+
+        public function render_post_receipt_page()
+        {
+            if (! current_user_can('manage_woocommerce')) {
+                wp_die('شما دسترسی لازم را ندارید.');
+            }
+
+            check_admin_referer('wpr_print_post_receipt');
+
+            if (! class_exists('WooCommerce')) {
+                wp_die('ووکامرس فعال نیست.');
+            }
+
+            $snapshot_order_ids = $this->get_snapshot_order_ids_from_request($_GET);
+            if (empty($snapshot_order_ids)) {
+                $stats_data = $this->get_processing_stats_data();
+            } else {
+                $snapshot_orders = $this->get_orders_by_ids($snapshot_order_ids);
+                $stats_data = $this->build_stats_data_from_orders($snapshot_orders);
+            }
+            $orders = $stats_data['orders'];
+
+            if (empty($orders)) {
+                wp_die('سفارشی برای چاپ رسید پست وجود ندارد.');
+            }
+
+            echo '<!DOCTYPE html><html lang="fa" dir="rtl"><head><meta charset="UTF-8">';
+            echo '<meta name="viewport" content="width=device-width, initial-scale=1.0">';
+            echo '<title>رسید پست سفارش‌ها</title>';
+            echo '<style>
+                    @page{size:A4;margin:10mm;}
+                    body{font-family:tahoma,Arial,sans-serif;background:#f6f7f7;color:#1d2327;padding:12px;}
+                    .report-wrap{max-width:1200px;margin:0 auto;background:#fff;padding:14px;border:1px solid #ccd0d4;}
+                    h1{margin:0 0 12px 0;font-size:20px;}
+                    table{width:100%;border-collapse:collapse;table-layout:fixed;}
+                    th,td{border:1px solid #000;padding:6px 5px;text-align:right;font-size:12px;vertical-align:top;word-break:break-word;}
+                    th{background:#f0f0f1;}
+                    .col-row{width:52px;text-align:center;}
+                    .col-check{width:30px;text-align:center;}
+                    .check-box{display:inline-block;width:10px;height:10px;border:1px solid #000;}
+                    .col-order{width:92px;text-align:center;white-space:nowrap;}
+                    .col-items{width:72px;text-align:center;white-space:nowrap;}
+                    .print-note{display:none;}
+                    @media print{
+                        body{background:#fff;padding:0;}
+                        .report-wrap{max-width:none;border:none;padding:0;}
+                    }
+                    @media screen{
+                        .print-note{display:block;margin:0 0 12px 0;}
+                    }
+                  </style></head><body>';
+            echo '<div class="report-wrap">';
+            echo '<p class="print-note">برای چاپ از Ctrl+P استفاده کنید.</p>';
+            echo '<h1>رسید پست سفارش‌ها</h1>';
+            echo '<table>';
+            echo '<thead><tr>';
+            echo '<th class="col-row">ردیف</th>';
+            echo '<th class="col-check"></th>';
+            echo '<th class="col-order">شماره سفارش</th>';
+            echo '<th>نام و نام خانوادگی</th>';
+            echo '<th>آدرس</th>';
+            echo '<th>کد پستی</th>';
+            echo '<th>شماره تلفن</th>';
+            echo '<th class="col-items">تعداد اقلام</th>';
+            echo '</tr></thead><tbody>';
+
+            foreach ($orders as $order_index => $order) {
+                $order_id = (int) $order->get_id();
+                $row_number = $order_index + 1;
+                $full_name = trim($order->get_billing_first_name() . ' ' . $order->get_billing_last_name());
+                $full_address = $this->get_full_shipping_address($order);
+                $postcode = $order->get_shipping_postcode();
+                if (empty($postcode)) {
+                    $postcode = $order->get_billing_postcode();
+                }
+                $phone = $this->normalize_iran_phone($order->get_billing_phone());
+                $total_order_items = 0;
+                foreach ($order->get_items() as $item) {
+                    $total_order_items += (int) $item->get_quantity();
+                }
+
+                echo '<tr>';
+                echo '<td class="col-row">' . esc_html((string) $row_number) . '</td>';
+                echo '<td class="col-check"><span class="check-box" aria-hidden="true"></span></td>';
+                echo '<td class="col-order">#' . esc_html((string) $order_id) . '</td>';
+                echo '<td>' . esc_html($full_name !== '' ? $full_name : '-') . '</td>';
+                echo '<td>' . esc_html($full_address !== '' ? $full_address : '-') . '</td>';
+                echo '<td>' . esc_html((string) $postcode !== '' ? (string) $postcode : '-') . '</td>';
+                echo '<td>' . esc_html((string) $phone !== '' ? (string) $phone : '-') . '</td>';
+                echo '<td class="col-items">' . esc_html((string) $total_order_items) . '</td>';
+                echo '</tr>';
+            }
+
+            echo '</tbody></table>';
+            echo '</div></body></html>';
+            exit;
         }
 
         public function render_stats_report_page()
@@ -757,11 +862,12 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
             echo '<th>تعداد بسته‌ها</th>';
             echo '<th>چاپ مجدد کلیه لیبل‌ها</th>';
             echo '<th>گزارش آمار</th>';
+            echo '<th>رسید پست</th>';
             echo '<th>حذف لاگ</th>';
             echo '</tr></thead><tbody>';
 
             if (empty($logs)) {
-                echo '<tr><td colspan="7">هنوز لاگی برای چاپ لیبل کلی ثبت نشده است.</td></tr>';
+                echo '<tr><td colspan="8">هنوز لاگی برای چاپ لیبل کلی ثبت نشده است.</td></tr>';
             } else {
                 foreach ($logs as $log) {
                     $print_link = add_query_arg(
@@ -777,6 +883,14 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
                             'action' => 'wpr_stats_report_from_log',
                             'log_id' => (int) $log->id,
                             '_wpnonce' => wp_create_nonce('wpr_stats_report_from_log_' . (int) $log->id),
+                        ],
+                        admin_url('admin-post.php')
+                    );
+                    $post_receipt_link = add_query_arg(
+                        [
+                            'action' => 'wpr_print_post_receipt_from_log',
+                            'log_id' => (int) $log->id,
+                            '_wpnonce' => wp_create_nonce('wpr_print_post_receipt_from_log_' . (int) $log->id),
                         ],
                         admin_url('admin-post.php')
                     );
@@ -799,6 +913,7 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
                     echo '<td>' . esc_html((string) $log->package_count) . '</td>';
                     echo '<td><a class="button button-secondary" target="_blank" href="' . esc_url($print_link) . '">چاپ مجدد</a></td>';
                     echo '<td><a class="button button-secondary" target="_blank" href="' . esc_url($stats_link) . '">نمایش گزارش</a></td>';
+                    echo '<td><a class="button button-secondary" target="_blank" href="' . esc_url($post_receipt_link) . '">دانلود رسید</a></td>';
                     echo '<td><a class="button button-link-delete" href="' . esc_url($delete_log_url) . '" onclick="return confirm(\'آیا از حذف این لاگ مطمئن هستید؟\');">حذف لاگ</a></td>';
                     echo '</tr>';
                 }
@@ -1214,6 +1329,40 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
                     '_wpnonce' => wp_create_nonce('wpr_stats_report'),
                     'snapshot_order_ids' => implode(',', array_map('absint', $order_ids)),
                     'log_id' => $log_id,
+                ],
+                admin_url('admin-post.php')
+            );
+            wp_safe_redirect($redirect_url);
+            exit;
+        }
+
+        public function render_post_receipt_from_log()
+        {
+            if (! current_user_can('manage_woocommerce')) {
+                wp_die('شما دسترسی لازم را ندارید.');
+            }
+
+            $log_id = isset($_GET['log_id']) ? absint($_GET['log_id']) : 0;
+            if (! $log_id) {
+                wp_die('شناسه لاگ نامعتبر است.');
+            }
+
+            check_admin_referer('wpr_print_post_receipt_from_log_' . $log_id);
+            $log = $this->get_label_log($log_id);
+            if (! $log) {
+                wp_die('لاگ چاپ پیدا نشد.');
+            }
+
+            $order_ids = json_decode((string) $log->order_ids, true);
+            if (! is_array($order_ids)) {
+                $order_ids = [];
+            }
+
+            $redirect_url = add_query_arg(
+                [
+                    'action' => 'wpr_print_post_receipt',
+                    '_wpnonce' => wp_create_nonce('wpr_print_post_receipt'),
+                    'snapshot_order_ids' => implode(',', array_map('absint', $order_ids)),
                 ],
                 admin_url('admin-post.php')
             );
