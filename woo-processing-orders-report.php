@@ -706,7 +706,7 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
             echo '<th class="col-address">آدرس</th>';
             echo '<th class="col-postcode">کد پستی</th>';
             echo '<th class="col-phone">شماره تلفن</th>';
-            echo '<th class="col-items">تعداد اقلام</th>';
+            echo '<th class="col-items">اقلام</th>';
             echo '</tr></thead><tbody>';
 
             foreach ($orders as $order_index => $order) {
