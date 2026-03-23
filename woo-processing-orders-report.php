@@ -472,6 +472,26 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
             return $order_number_text;
         }
 
+        private function current_user_has_role($role_name)
+        {
+            $user = wp_get_current_user();
+            if (! $user || empty($user->roles) || ! is_array($user->roles)) {
+                return false;
+            }
+
+            return in_array((string) $role_name, $user->roles, true);
+        }
+
+        private function current_user_can_view_logs_page()
+        {
+            return current_user_can('manage_woocommerce') || $this->current_user_has_role('formeditor');
+        }
+
+        private function current_user_can_delete_logs()
+        {
+            return current_user_can('manage_woocommerce');
+        }
+
         public function __construct()
         {
             add_action('admin_menu', [$this, 'register_menu']);
@@ -485,6 +505,8 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
             add_action('admin_post_wpr_stats_report_from_log', [$this, 'render_stats_report_from_log']);
             add_action('admin_post_wpr_print_post_receipt_from_log', [$this, 'render_post_receipt_from_log']);
             add_action('admin_post_wpr_delete_label_log', [$this, 'delete_label_log']);
+            add_action('admin_post_wpr_bulk_delete_label_logs', [$this, 'bulk_delete_label_logs']);
+            add_shortcode('wpr_label_logs', [$this, 'render_logs_shortcode']);
         }
 
         public function register_menu()
@@ -499,11 +521,15 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
                 56
             );
 
+            $logs_menu_capability = $this->current_user_can_view_logs_page() && ! current_user_can('manage_woocommerce')
+                ? 'read'
+                : 'manage_woocommerce';
+
             add_submenu_page(
                 'wpr-processing-orders-report',
                 'لاگ چاپ لیبل',
                 'لاگ چاپ لیبل',
-                'manage_woocommerce',
+                $logs_menu_capability,
                 'wpr-processing-orders-report-logs',
                 [$this, 'render_logs_page']
             );
@@ -642,7 +668,7 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
 
         public function render_post_receipt_page()
         {
-            if (! current_user_can('manage_woocommerce')) {
+            if (! $this->current_user_can_view_logs_page()) {
                 wp_die('شما دسترسی لازم را ندارید.');
             }
 
@@ -669,7 +695,7 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
             echo '<meta name="viewport" content="width=device-width, initial-scale=1.0">';
             echo '<title>رسید پست سفارش‌ها</title>';
             echo '<style>
-                    @page{size:A4;margin:10mm;}
+                    @page{size:A4 landscape;margin:10mm;}
                     body{font-family:tahoma,Arial,sans-serif;background:#f6f7f7;color:#1d2327;padding:12px;}
                     .report-wrap{max-width:1200px;margin:0 auto;background:#fff;padding:14px;border:1px solid #ccd0d4;}
                     h1{margin:0 0 12px 0;font-size:20px;}
@@ -706,7 +732,7 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
             echo '<th class="col-address">آدرس</th>';
             echo '<th class="col-postcode">کد پستی</th>';
             echo '<th class="col-phone">شماره تلفن</th>';
-            echo '<th class="col-items">تعداد اقلام</th>';
+            echo '<th class="col-items">اقلام</th>';
             echo '</tr></thead><tbody>';
 
             foreach ($orders as $order_index => $order) {
@@ -743,7 +769,7 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
 
         public function render_stats_report_page()
         {
-            if (! current_user_can('manage_woocommerce')) {
+            if (! $this->current_user_can_view_logs_page()) {
                 wp_die('شما دسترسی لازم را ندارید.');
             }
 
@@ -844,22 +870,49 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
 
         public function render_logs_page()
         {
-            if (! current_user_can('manage_woocommerce')) {
+            if (! $this->current_user_can_view_logs_page()) {
                 wp_die('شما دسترسی لازم را ندارید.');
             }
 
             global $wpdb;
             $this->ensure_label_log_table_exists();
             $table_name = $wpdb->prefix . self::LABEL_LOG_TABLE_SUFFIX;
-            $logs = $wpdb->get_results("SELECT * FROM {$table_name} ORDER BY id DESC LIMIT 500");
+            $can_delete_logs = $this->current_user_can_delete_logs();
+            $per_page = 25;
+            $current_page = isset($_GET['wpr_logs_page']) ? max(1, absint($_GET['wpr_logs_page'])) : 1;
+            $total_logs = (int) $wpdb->get_var("SELECT COUNT(*) FROM {$table_name}");
+            $total_pages = max(1, (int) ceil($total_logs / $per_page));
+            if ($current_page > $total_pages) {
+                $current_page = $total_pages;
+            }
+            $offset = ($current_page - 1) * $per_page;
+            $logs = $wpdb->get_results(
+                $wpdb->prepare(
+                    "SELECT * FROM {$table_name} ORDER BY id DESC LIMIT %d OFFSET %d",
+                    $per_page,
+                    $offset
+                )
+            );
 
             echo '<div class="wrap">';
             echo '<h1>لاگ چاپ لیبل کلی</h1>';
             if (isset($_GET['wpr_log_deleted']) && $_GET['wpr_log_deleted'] === '1') {
                 echo '<div class="notice notice-success is-dismissible"><p>لاگ با موفقیت حذف شد.</p></div>';
             }
+            if (isset($_GET['wpr_logs_deleted']) && $_GET['wpr_logs_deleted'] === '1') {
+                echo '<div class="notice notice-success is-dismissible"><p>لاگ‌های انتخاب‌شده با موفقیت حذف شدند.</p></div>';
+            }
+            if ($can_delete_logs) {
+                echo '<form method="post" action="' . esc_url(admin_url('admin-post.php')) . '" style="margin:0 0 12px 0;">';
+                echo '<input type="hidden" name="action" value="wpr_bulk_delete_label_logs" />';
+                wp_nonce_field('wpr_bulk_delete_label_logs');
+                echo '<button type="submit" class="button button-secondary" onclick="return confirm(\'آیا از حذف لاگ‌های انتخاب‌شده مطمئن هستید؟\');">حذف همه انتخاب‌شده‌ها</button>';
+            }
             echo '<table class="widefat striped">';
             echo '<thead><tr>';
+            if ($can_delete_logs) {
+                echo '<th style="width:34px;text-align:center;"><input type="checkbox" id="wpr-select-all-logs" /></th>';
+            }
             echo '<th>شماره لاگ</th>';
             echo '<th>تاریخ چاپ لیبل</th>';
             echo '<th>تعداد سفارشات</th>';
@@ -867,11 +920,13 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
             echo '<th>چاپ مجدد کلیه لیبل‌ها</th>';
             echo '<th>گزارش آمار</th>';
             echo '<th>رسید پست</th>';
-            echo '<th>حذف لاگ</th>';
+            if ($can_delete_logs) {
+                echo '<th>حذف لاگ</th>';
+            }
             echo '</tr></thead><tbody>';
 
             if (empty($logs)) {
-                echo '<tr><td colspan="8">هنوز لاگی برای چاپ لیبل کلی ثبت نشده است.</td></tr>';
+                echo '<tr><td colspan="' . esc_attr($can_delete_logs ? '9' : '7') . '">هنوز لاگی برای چاپ لیبل کلی ثبت نشده است.</td></tr>';
             } else {
                 foreach ($logs as $log) {
                     $print_link = add_query_arg(
@@ -911,6 +966,9 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
                     );
 
                     echo '<tr>';
+                    if ($can_delete_logs) {
+                        echo '<td style="text-align:center;"><input type="checkbox" name="log_ids[]" value="' . esc_attr((string) $log->id) . '" class="wpr-log-checkbox" /></td>';
+                    }
                     echo '<td>' . esc_html((string) $log->id) . '</td>';
                     echo '<td>' . esc_html($printed_at) . '</td>';
                     echo '<td>' . esc_html((string) $log->order_count) . '</td>';
@@ -918,12 +976,49 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
                     echo '<td><a class="button button-secondary" target="_blank" href="' . esc_url($print_link) . '">چاپ مجدد</a></td>';
                     echo '<td><a class="button button-secondary" target="_blank" href="' . esc_url($stats_link) . '">نمایش گزارش</a></td>';
                     echo '<td><a class="button button-secondary" target="_blank" href="' . esc_url($post_receipt_link) . '">دانلود رسید</a></td>';
-                    echo '<td><a class="button button-link-delete" href="' . esc_url($delete_log_url) . '" onclick="return confirm(\'آیا از حذف این لاگ مطمئن هستید؟\');">حذف لاگ</a></td>';
+                    if ($can_delete_logs) {
+                        echo '<td><a class="button button-link-delete" href="' . esc_url($delete_log_url) . '" onclick="return confirm(\'آیا از حذف این لاگ مطمئن هستید؟\');">حذف لاگ</a></td>';
+                    }
                     echo '</tr>';
                 }
             }
 
             echo '</tbody></table>';
+            if ($can_delete_logs) {
+                echo '<script>
+                    (function(){
+                        var selectAll = document.getElementById("wpr-select-all-logs");
+                        if (!selectAll) { return; }
+                        selectAll.addEventListener("change", function() {
+                            var checkboxes = document.querySelectorAll(".wpr-log-checkbox");
+                            for (var i = 0; i < checkboxes.length; i++) {
+                                checkboxes[i].checked = !!selectAll.checked;
+                            }
+                        });
+                    })();
+                </script>';
+            }
+            if ($total_pages > 1) {
+                $pagination_base = remove_query_arg('wpr_logs_page');
+                $pagination_links = paginate_links([
+                    'base' => add_query_arg('wpr_logs_page', '%#%', $pagination_base),
+                    'format' => '',
+                    'current' => $current_page,
+                    'total' => $total_pages,
+                    'type' => 'plain',
+                    'prev_text' => 'قبلی',
+                    'next_text' => 'بعدی',
+                ]);
+
+                if (! empty($pagination_links)) {
+                    echo '<div class="tablenav"><div class="tablenav-pages" style="margin-top:12px;">';
+                    echo wp_kses_post($pagination_links);
+                    echo '</div></div>';
+                }
+            }
+            if ($can_delete_logs) {
+                echo '</form>';
+            }
             echo '</div>';
         }
 
@@ -1158,7 +1253,7 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
 
         public function render_print_all_labels_page()
         {
-            if (! current_user_can('manage_woocommerce')) {
+            if (! $this->current_user_can_view_logs_page()) {
                 wp_die('شما دسترسی لازم را ندارید.');
             }
 
@@ -1273,7 +1368,7 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
 
         public function render_print_all_labels_from_log()
         {
-            if (! current_user_can('manage_woocommerce')) {
+            if (! $this->current_user_can_view_logs_page()) {
                 wp_die('شما دسترسی لازم را ندارید.');
             }
 
@@ -1307,7 +1402,7 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
 
         public function render_stats_report_from_log()
         {
-            if (! current_user_can('manage_woocommerce')) {
+            if (! $this->current_user_can_view_logs_page()) {
                 wp_die('شما دسترسی لازم را ندارید.');
             }
 
@@ -1342,7 +1437,7 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
 
         public function render_post_receipt_from_log()
         {
-            if (! current_user_can('manage_woocommerce')) {
+            if (! $this->current_user_can_view_logs_page()) {
                 wp_die('شما دسترسی لازم را ندارید.');
             }
 
@@ -1376,7 +1471,7 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
 
         public function delete_label_log()
         {
-            if (! current_user_can('manage_woocommerce')) {
+            if (! $this->current_user_can_delete_logs()) {
                 wp_die('شما دسترسی لازم را ندارید.');
             }
 
@@ -1402,6 +1497,151 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
 
             wp_safe_redirect($redirect_url);
             exit;
+        }
+
+        public function bulk_delete_label_logs()
+        {
+            if (! $this->current_user_can_delete_logs()) {
+                wp_die('شما دسترسی لازم را ندارید.');
+            }
+
+            check_admin_referer('wpr_bulk_delete_label_logs');
+
+            $log_ids = isset($_POST['log_ids']) ? (array) wp_unslash($_POST['log_ids']) : [];
+            $log_ids = array_values(array_unique(array_filter(array_map('absint', $log_ids))));
+
+            if (! empty($log_ids)) {
+                global $wpdb;
+                $this->ensure_label_log_table_exists();
+                $table_name = $wpdb->prefix . self::LABEL_LOG_TABLE_SUFFIX;
+                $placeholders = implode(',', array_fill(0, count($log_ids), '%d'));
+                $query = $wpdb->prepare("DELETE FROM {$table_name} WHERE id IN ({$placeholders})", $log_ids);
+                $wpdb->query($query);
+            }
+
+            $redirect_url = add_query_arg(
+                [
+                    'page' => 'wpr-processing-orders-report-logs',
+                    'wpr_logs_deleted' => '1',
+                ],
+                admin_url('admin.php')
+            );
+
+            wp_safe_redirect($redirect_url);
+            exit;
+        }
+
+        public function render_logs_shortcode()
+        {
+            if (! is_user_logged_in()) {
+                ob_start();
+                echo '<div class="wpr-logs-shortcode-login">';
+                echo '<p>برای مشاهده لاگ‌ها ابتدا وارد حساب کاربری خود شوید.</p>';
+                wp_login_form([
+                    'echo' => true,
+                    'redirect' => esc_url_raw((string) home_url(add_query_arg([], $GLOBALS['wp']->request ?? ''))),
+                ]);
+                echo '</div>';
+                return (string) ob_get_clean();
+            }
+
+            if (! $this->current_user_can_view_logs_page()) {
+                return '<p>شما اجازه مشاهده لاگ‌ها را ندارید.</p>';
+            }
+
+            global $wpdb;
+            $this->ensure_label_log_table_exists();
+            $table_name = $wpdb->prefix . self::LABEL_LOG_TABLE_SUFFIX;
+            $per_page = 25;
+            $current_page = isset($_GET['wpr_logs_page']) ? max(1, absint($_GET['wpr_logs_page'])) : 1;
+            $total_logs = (int) $wpdb->get_var("SELECT COUNT(*) FROM {$table_name}");
+            $total_pages = max(1, (int) ceil($total_logs / $per_page));
+            if ($current_page > $total_pages) {
+                $current_page = $total_pages;
+            }
+            $offset = ($current_page - 1) * $per_page;
+            $logs = $wpdb->get_results(
+                $wpdb->prepare(
+                    "SELECT * FROM {$table_name} ORDER BY id DESC LIMIT %d OFFSET %d",
+                    $per_page,
+                    $offset
+                )
+            );
+
+            ob_start();
+            echo '<div class="wpr-logs-shortcode">';
+            echo '<table style="width:100%;border-collapse:collapse;">';
+            echo '<thead><tr>';
+            echo '<th style="border:1px solid #ddd;padding:8px;">شماره لاگ</th>';
+            echo '<th style="border:1px solid #ddd;padding:8px;">تاریخ چاپ لیبل</th>';
+            echo '<th style="border:1px solid #ddd;padding:8px;">تعداد سفارشات</th>';
+            echo '<th style="border:1px solid #ddd;padding:8px;">تعداد بسته‌ها</th>';
+            echo '<th style="border:1px solid #ddd;padding:8px;">چاپ مجدد کلیه لیبل‌ها</th>';
+            echo '<th style="border:1px solid #ddd;padding:8px;">گزارش آمار</th>';
+            echo '<th style="border:1px solid #ddd;padding:8px;">رسید پست</th>';
+            echo '</tr></thead><tbody>';
+
+            if (empty($logs)) {
+                echo '<tr><td colspan="7" style="border:1px solid #ddd;padding:8px;">لاگی ثبت نشده است.</td></tr>';
+            } else {
+                foreach ($logs as $log) {
+                    $printed_timestamp = $this->parse_mysql_datetime_to_wp_timestamp($log->printed_at);
+                    $printed_at = $printed_timestamp ? $this->format_persian_datetime($printed_timestamp) : (string) $log->printed_at;
+                    $print_link = add_query_arg(
+                        [
+                            'action' => 'wpr_print_all_labels_from_log',
+                            'log_id' => (int) $log->id,
+                            '_wpnonce' => wp_create_nonce('wpr_print_all_labels_from_log_' . (int) $log->id),
+                        ],
+                        admin_url('admin-post.php')
+                    );
+                    $stats_link = add_query_arg(
+                        [
+                            'action' => 'wpr_stats_report_from_log',
+                            'log_id' => (int) $log->id,
+                            '_wpnonce' => wp_create_nonce('wpr_stats_report_from_log_' . (int) $log->id),
+                        ],
+                        admin_url('admin-post.php')
+                    );
+                    $post_receipt_link = add_query_arg(
+                        [
+                            'action' => 'wpr_print_post_receipt_from_log',
+                            'log_id' => (int) $log->id,
+                            '_wpnonce' => wp_create_nonce('wpr_print_post_receipt_from_log_' . (int) $log->id),
+                        ],
+                        admin_url('admin-post.php')
+                    );
+                    echo '<tr>';
+                    echo '<td style="border:1px solid #ddd;padding:8px;">' . esc_html((string) $log->id) . '</td>';
+                    echo '<td style="border:1px solid #ddd;padding:8px;">' . esc_html($printed_at) . '</td>';
+                    echo '<td style="border:1px solid #ddd;padding:8px;">' . esc_html((string) $log->order_count) . '</td>';
+                    echo '<td style="border:1px solid #ddd;padding:8px;">' . esc_html((string) $log->package_count) . '</td>';
+                    echo '<td style="border:1px solid #ddd;padding:8px;"><a href="' . esc_url($print_link) . '" target="_blank" rel="noopener noreferrer">چاپ مجدد</a></td>';
+                    echo '<td style="border:1px solid #ddd;padding:8px;"><a href="' . esc_url($stats_link) . '" target="_blank" rel="noopener noreferrer">نمایش گزارش</a></td>';
+                    echo '<td style="border:1px solid #ddd;padding:8px;"><a href="' . esc_url($post_receipt_link) . '" target="_blank" rel="noopener noreferrer">دانلود رسید</a></td>';
+                    echo '</tr>';
+                }
+            }
+            echo '</tbody></table>';
+
+            if ($total_pages > 1) {
+                $pagination_base = remove_query_arg('wpr_logs_page');
+                $pagination_links = paginate_links([
+                    'base' => add_query_arg('wpr_logs_page', '%#%', $pagination_base),
+                    'format' => '',
+                    'current' => $current_page,
+                    'total' => $total_pages,
+                    'type' => 'plain',
+                    'prev_text' => 'قبلی',
+                    'next_text' => 'بعدی',
+                ]);
+                if (! empty($pagination_links)) {
+                    echo '<div style="margin-top:12px;">' . wp_kses_post($pagination_links) . '</div>';
+                }
+            }
+
+            echo '</div>';
+            return (string) ob_get_clean();
         }
 
         public function save_address()
