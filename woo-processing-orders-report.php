@@ -668,7 +668,7 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
 
         public function render_post_receipt_page()
         {
-            if (! current_user_can('manage_woocommerce')) {
+            if (! $this->current_user_can_view_logs_page()) {
                 wp_die('شما دسترسی لازم را ندارید.');
             }
 
@@ -769,7 +769,7 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
 
         public function render_stats_report_page()
         {
-            if (! current_user_can('manage_woocommerce')) {
+            if (! $this->current_user_can_view_logs_page()) {
                 wp_die('شما دسترسی لازم را ندارید.');
             }
 
@@ -1253,7 +1253,7 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
 
         public function render_print_all_labels_page()
         {
-            if (! current_user_can('manage_woocommerce')) {
+            if (! $this->current_user_can_view_logs_page()) {
                 wp_die('شما دسترسی لازم را ندارید.');
             }
 
