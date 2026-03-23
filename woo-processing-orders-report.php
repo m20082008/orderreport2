@@ -1533,7 +1533,19 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
 
         public function render_logs_shortcode()
         {
-            if (! is_user_logged_in() || ! $this->current_user_can_view_logs_page()) {
+            if (! is_user_logged_in()) {
+                ob_start();
+                echo '<div class="wpr-logs-shortcode-login">';
+                echo '<p>برای مشاهده لاگ‌ها ابتدا وارد حساب کاربری خود شوید.</p>';
+                wp_login_form([
+                    'echo' => true,
+                    'redirect' => esc_url_raw((string) home_url(add_query_arg([], $GLOBALS['wp']->request ?? ''))),
+                ]);
+                echo '</div>';
+                return (string) ob_get_clean();
+            }
+
+            if (! $this->current_user_can_view_logs_page()) {
                 return '<p>شما اجازه مشاهده لاگ‌ها را ندارید.</p>';
             }
 
@@ -1564,19 +1576,49 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
             echo '<th style="border:1px solid #ddd;padding:8px;">تاریخ چاپ لیبل</th>';
             echo '<th style="border:1px solid #ddd;padding:8px;">تعداد سفارشات</th>';
             echo '<th style="border:1px solid #ddd;padding:8px;">تعداد بسته‌ها</th>';
+            echo '<th style="border:1px solid #ddd;padding:8px;">چاپ مجدد کلیه لیبل‌ها</th>';
+            echo '<th style="border:1px solid #ddd;padding:8px;">گزارش آمار</th>';
+            echo '<th style="border:1px solid #ddd;padding:8px;">رسید پست</th>';
             echo '</tr></thead><tbody>';
 
             if (empty($logs)) {
-                echo '<tr><td colspan="4" style="border:1px solid #ddd;padding:8px;">لاگی ثبت نشده است.</td></tr>';
+                echo '<tr><td colspan="7" style="border:1px solid #ddd;padding:8px;">لاگی ثبت نشده است.</td></tr>';
             } else {
                 foreach ($logs as $log) {
                     $printed_timestamp = $this->parse_mysql_datetime_to_wp_timestamp($log->printed_at);
                     $printed_at = $printed_timestamp ? $this->format_persian_datetime($printed_timestamp) : (string) $log->printed_at;
+                    $print_link = add_query_arg(
+                        [
+                            'action' => 'wpr_print_all_labels_from_log',
+                            'log_id' => (int) $log->id,
+                            '_wpnonce' => wp_create_nonce('wpr_print_all_labels_from_log_' . (int) $log->id),
+                        ],
+                        admin_url('admin-post.php')
+                    );
+                    $stats_link = add_query_arg(
+                        [
+                            'action' => 'wpr_stats_report_from_log',
+                            'log_id' => (int) $log->id,
+                            '_wpnonce' => wp_create_nonce('wpr_stats_report_from_log_' . (int) $log->id),
+                        ],
+                        admin_url('admin-post.php')
+                    );
+                    $post_receipt_link = add_query_arg(
+                        [
+                            'action' => 'wpr_print_post_receipt_from_log',
+                            'log_id' => (int) $log->id,
+                            '_wpnonce' => wp_create_nonce('wpr_print_post_receipt_from_log_' . (int) $log->id),
+                        ],
+                        admin_url('admin-post.php')
+                    );
                     echo '<tr>';
                     echo '<td style="border:1px solid #ddd;padding:8px;">' . esc_html((string) $log->id) . '</td>';
                     echo '<td style="border:1px solid #ddd;padding:8px;">' . esc_html($printed_at) . '</td>';
                     echo '<td style="border:1px solid #ddd;padding:8px;">' . esc_html((string) $log->order_count) . '</td>';
                     echo '<td style="border:1px solid #ddd;padding:8px;">' . esc_html((string) $log->package_count) . '</td>';
+                    echo '<td style="border:1px solid #ddd;padding:8px;"><a href="' . esc_url($print_link) . '" target="_blank" rel="noopener noreferrer">چاپ مجدد</a></td>';
+                    echo '<td style="border:1px solid #ddd;padding:8px;"><a href="' . esc_url($stats_link) . '" target="_blank" rel="noopener noreferrer">نمایش گزارش</a></td>';
+                    echo '<td style="border:1px solid #ddd;padding:8px;"><a href="' . esc_url($post_receipt_link) . '" target="_blank" rel="noopener noreferrer">دانلود رسید</a></td>';
                     echo '</tr>';
                 }
             }
