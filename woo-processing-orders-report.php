@@ -676,11 +676,15 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
                     table{width:100%;border-collapse:collapse;table-layout:fixed;}
                     th,td{border:1px solid #000;padding:6px 5px;text-align:right;font-size:12px;vertical-align:top;word-break:break-word;}
                     th{background:#f0f0f1;}
-                    .col-row{width:52px;text-align:center;}
+                    .col-row{width:4ch;min-width:4ch;text-align:center;white-space:nowrap;}
                     .col-check{width:30px;text-align:center;}
                     .check-box{display:inline-block;width:10px;height:10px;border:1px solid #000;}
                     .col-order{width:92px;text-align:center;white-space:nowrap;}
-                    .col-items{width:72px;text-align:center;white-space:nowrap;}
+                    .col-recipient{width:18%;}
+                    .col-address{width:42%;}
+                    .col-postcode{width:12ch;min-width:12ch;max-width:12ch;text-align:center;white-space:nowrap;direction:ltr;}
+                    .col-phone{width:11ch;min-width:11ch;max-width:11ch;text-align:center;white-space:nowrap;direction:ltr;}
+                    .col-items{width:3ch;min-width:3ch;max-width:3ch;text-align:center;white-space:nowrap;direction:ltr;}
                     .print-note{display:none;}
                     @media print{
                         body{background:#fff;padding:0;}
@@ -698,10 +702,10 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
             echo '<th class="col-row">ردیف</th>';
             echo '<th class="col-check"></th>';
             echo '<th class="col-order">شماره سفارش</th>';
-            echo '<th>نام و نام خانوادگی</th>';
-            echo '<th>آدرس</th>';
-            echo '<th>کد پستی</th>';
-            echo '<th>شماره تلفن</th>';
+            echo '<th class="col-recipient">گیرنده</th>';
+            echo '<th class="col-address">آدرس</th>';
+            echo '<th class="col-postcode">کد پستی</th>';
+            echo '<th class="col-phone">شماره تلفن</th>';
             echo '<th class="col-items">تعداد اقلام</th>';
             echo '</tr></thead><tbody>';
 
@@ -724,10 +728,10 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
                 echo '<td class="col-row">' . esc_html((string) $row_number) . '</td>';
                 echo '<td class="col-check"><span class="check-box" aria-hidden="true"></span></td>';
                 echo '<td class="col-order">#' . esc_html((string) $order_id) . '</td>';
-                echo '<td>' . esc_html($full_name !== '' ? $full_name : '-') . '</td>';
-                echo '<td>' . esc_html($full_address !== '' ? $full_address : '-') . '</td>';
-                echo '<td>' . esc_html((string) $postcode !== '' ? (string) $postcode : '-') . '</td>';
-                echo '<td>' . esc_html((string) $phone !== '' ? (string) $phone : '-') . '</td>';
+                echo '<td class="col-recipient">' . esc_html($full_name !== '' ? $full_name : '-') . '</td>';
+                echo '<td class="col-address">' . esc_html($full_address !== '' ? $full_address : '-') . '</td>';
+                echo '<td class="col-postcode">' . esc_html((string) $postcode !== '' ? (string) $postcode : '-') . '</td>';
+                echo '<td class="col-phone">' . esc_html((string) $phone !== '' ? (string) $phone : '-') . '</td>';
                 echo '<td class="col-items">' . esc_html((string) $total_order_items) . '</td>';
                 echo '</tr>';
             }
