@@ -851,7 +851,21 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
             global $wpdb;
             $this->ensure_label_log_table_exists();
             $table_name = $wpdb->prefix . self::LABEL_LOG_TABLE_SUFFIX;
-            $logs = $wpdb->get_results("SELECT * FROM {$table_name} ORDER BY id DESC LIMIT 500");
+            $per_page = 25;
+            $current_page = isset($_GET['wpr_logs_page']) ? max(1, absint($_GET['wpr_logs_page'])) : 1;
+            $total_logs = (int) $wpdb->get_var("SELECT COUNT(*) FROM {$table_name}");
+            $total_pages = max(1, (int) ceil($total_logs / $per_page));
+            if ($current_page > $total_pages) {
+                $current_page = $total_pages;
+            }
+            $offset = ($current_page - 1) * $per_page;
+            $logs = $wpdb->get_results(
+                $wpdb->prepare(
+                    "SELECT * FROM {$table_name} ORDER BY id DESC LIMIT %d OFFSET %d",
+                    $per_page,
+                    $offset
+                )
+            );
 
             echo '<div class="wrap">';
             echo '<h1>لاگ چاپ لیبل کلی</h1>';
@@ -924,6 +938,24 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
             }
 
             echo '</tbody></table>';
+            if ($total_pages > 1) {
+                $pagination_base = remove_query_arg('wpr_logs_page');
+                $pagination_links = paginate_links([
+                    'base' => add_query_arg('wpr_logs_page', '%#%', $pagination_base),
+                    'format' => '',
+                    'current' => $current_page,
+                    'total' => $total_pages,
+                    'type' => 'plain',
+                    'prev_text' => 'قبلی',
+                    'next_text' => 'بعدی',
+                ]);
+
+                if (! empty($pagination_links)) {
+                    echo '<div class="tablenav"><div class="tablenav-pages" style="margin-top:12px;">';
+                    echo wp_kses_post($pagination_links);
+                    echo '</div></div>';
+                }
+            }
             echo '</div>';
         }
 
