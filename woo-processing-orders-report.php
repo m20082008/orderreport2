@@ -669,7 +669,7 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
             echo '<meta name="viewport" content="width=device-width, initial-scale=1.0">';
             echo '<title>رسید پست سفارش‌ها</title>';
             echo '<style>
-                    @page{size:A4;margin:10mm;}
+                    @page{size:A4 landscape;margin:10mm;}
                     body{font-family:tahoma,Arial,sans-serif;background:#f6f7f7;color:#1d2327;padding:12px;}
                     .report-wrap{max-width:1200px;margin:0 auto;background:#fff;padding:14px;border:1px solid #ccd0d4;}
                     h1{margin:0 0 12px 0;font-size:20px;}
