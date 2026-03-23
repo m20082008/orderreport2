@@ -669,7 +669,7 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
             echo '<meta name="viewport" content="width=device-width, initial-scale=1.0">';
             echo '<title>رسید پست سفارش‌ها</title>';
             echo '<style>
-                    @page{size:A4;margin:10mm;}
+                    @page{size:A4 landscape;margin:10mm;}
                     body{font-family:tahoma,Arial,sans-serif;background:#f6f7f7;color:#1d2327;padding:12px;}
                     .report-wrap{max-width:1200px;margin:0 auto;background:#fff;padding:14px;border:1px solid #ccd0d4;}
                     h1{margin:0 0 12px 0;font-size:20px;}
@@ -706,7 +706,7 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
             echo '<th class="col-address">آدرس</th>';
             echo '<th class="col-postcode">کد پستی</th>';
             echo '<th class="col-phone">شماره تلفن</th>';
-            echo '<th class="col-items">تعداد اقلام</th>';
+            echo '<th class="col-items">اقلام</th>';
             echo '</tr></thead><tbody>';
 
             foreach ($orders as $order_index => $order) {
@@ -851,7 +851,21 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
             global $wpdb;
             $this->ensure_label_log_table_exists();
             $table_name = $wpdb->prefix . self::LABEL_LOG_TABLE_SUFFIX;
-            $logs = $wpdb->get_results("SELECT * FROM {$table_name} ORDER BY id DESC LIMIT 500");
+            $per_page = 25;
+            $current_page = isset($_GET['wpr_logs_page']) ? max(1, absint($_GET['wpr_logs_page'])) : 1;
+            $total_logs = (int) $wpdb->get_var("SELECT COUNT(*) FROM {$table_name}");
+            $total_pages = max(1, (int) ceil($total_logs / $per_page));
+            if ($current_page > $total_pages) {
+                $current_page = $total_pages;
+            }
+            $offset = ($current_page - 1) * $per_page;
+            $logs = $wpdb->get_results(
+                $wpdb->prepare(
+                    "SELECT * FROM {$table_name} ORDER BY id DESC LIMIT %d OFFSET %d",
+                    $per_page,
+                    $offset
+                )
+            );
 
             echo '<div class="wrap">';
             echo '<h1>لاگ چاپ لیبل کلی</h1>';
@@ -924,6 +938,24 @@ if (! class_exists('WPR_Processing_Orders_Report')) {
             }
 
             echo '</tbody></table>';
+            if ($total_pages > 1) {
+                $pagination_base = remove_query_arg('wpr_logs_page');
+                $pagination_links = paginate_links([
+                    'base' => add_query_arg('wpr_logs_page', '%#%', $pagination_base),
+                    'format' => '',
+                    'current' => $current_page,
+                    'total' => $total_pages,
+                    'type' => 'plain',
+                    'prev_text' => 'قبلی',
+                    'next_text' => 'بعدی',
+                ]);
+
+                if (! empty($pagination_links)) {
+                    echo '<div class="tablenav"><div class="tablenav-pages" style="margin-top:12px;">';
+                    echo wp_kses_post($pagination_links);
+                    echo '</div></div>';
+                }
+            }
             echo '</div>';
         }
 
